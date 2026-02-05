@@ -3,6 +3,8 @@
  * 统一错误处理逻辑，提供错误分类和恢复建议
  */
 
+import logger from './logger';
+
 export enum ErrorCategory {
   NETWORK = 'network',           // 网络错误（可重试）
   RPC = 'rpc',                   // RPC 端点错误（可重试）
@@ -250,4 +252,3 @@ export class ErrorHandler {
   }
 }
 
-import logger from './logger';

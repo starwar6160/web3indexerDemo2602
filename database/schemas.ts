@@ -36,12 +36,17 @@ export type ValidatedBlock = z.infer<typeof BlockSchema>;
 /**
  * 数据库区块 Schema
  * 用于验证从数据库读取的数据
+ *
+ * CRITICAL FIX: timestamp 使用 bigint 而不是 number
+ * 防止 JS Number 精度丢失（安全整数范围 ±2^53）
+ * 适用于毫秒时间戳和未来更大的值
  */
 export const DbBlockSchema = z.object({
   number: z.bigint(),
   hash: z.string().startsWith('0x'),
-  timestamp: z.number(),
+  timestamp: z.bigint(), // ✅ 使用 bigint（而不是 number）
   parent_hash: z.string().startsWith('0x'),
+  chain_id: z.bigint().optional(), // 可选的 chain_id（Phase 1 已添加）
   created_at: z.coerce.date(), // 自动处理字符串 -> Date
   updated_at: z.coerce.date(),
 });
@@ -85,14 +90,16 @@ export function validateBlocks(blocks: unknown[]): ValidatedBlock[] {
  * 转换为数据库格式
  * @param block - 验证后的区块数据
  * @returns 数据库区块数据
+ *
+ * CRITICAL FIX: 保持 bigint 类型，不进行 Number() 转换
+ * 防止精度丢失（JS Number 安全整数范围: ±2^53-1）
  */
 export function toDbBlock(block: ValidatedBlock) {
-  // 将 bigint timestamp 转换为 number 用于存储（如果还在使用 integer）
-  // 迁移到 bigint 后可以直接使用
   return {
     number: block.number,
     hash: block.hash,
-    timestamp: Number(block.timestamp), // 转换为 number（兼容现有 schema）
+    timestamp: block.timestamp, // ✅ 保持 bigint，不转换
     parent_hash: block.parentHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
+    chain_id: 1n, // ✅ 默认 chain_id（Phase 1 已添加到 schema）
   };
 }

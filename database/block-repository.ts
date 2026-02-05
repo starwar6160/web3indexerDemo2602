@@ -5,7 +5,7 @@ import { validateBlocks, toDbBlock, ValidatedBlock } from './schemas';
 import { Transaction } from 'kysely';
 
 export class BlockRepository {
-  private db = getDb();
+  public db = getDb(); // Made public for transaction support
 
   async create(blockData: Omit<NewBlock, 'created_at' | 'updated_at'>): Promise<Block> {
     const now = new Date().toISOString();
@@ -88,15 +88,12 @@ export class BlockRepository {
             .onConflict((oc) => oc
               .column(['chain_id', 'number'])
               .doUpdateSet({
-                // Only update if hash changed (reorg scenario)
-                hash: sql`EXCLUDED.hash`,
-                parent_hash: sql`EXCLUDED.parent_hash`,
-                timestamp: sql`EXCLUDED.timestamp`,
+                hash: block.hash,
+                parent_hash: block.parent_hash,
+                timestamp: block.timestamp,
                 updated_at: new Date().toISOString(),
               })
-              .where(({ eb }) => eb(
-                'blocks.hash', '!=', sql`${block.hash}`
-              ))
+              .where('blocks.hash', '!=', block.hash)
             )
             .returningAll()
             .executeTakeFirst();
@@ -248,8 +245,29 @@ export class BlockRepository {
 
   /**
    * Delete all blocks after a specific block number (for reorg handling)
+   *
+   * CRITICAL FIX: Added safety limit to prevent accidental mass deletion
+   * in case of extreme reorg depth or incorrect blockNumber
    */
   async deleteBlocksAfter(blockNumber: bigint): Promise<number> {
+    const MAX_REORG_DEPTH = 1000; // Maximum allowed reorg depth
+
+    // Check current max block before deletion
+    const currentMax = await this.getMaxBlockNumber();
+
+    if (currentMax && currentMax > blockNumber) {
+      const depth = Number(currentMax - blockNumber);
+
+      if (depth > MAX_REORG_DEPTH) {
+        throw new Error(
+          `Reorg depth ${depth} exceeds maximum allowed ${MAX_REORG_DEPTH}. ` +
+          `Manual intervention required. Current max: ${currentMax}, Requested: ${blockNumber}`
+        );
+      }
+
+      console.warn(`[Repository] Deleting ${depth} blocks after ${blockNumber} (reorg detected)`);
+    }
+
     const result = await this.db
       .deleteFrom('blocks')
       .where('number', '>', blockNumber)
@@ -268,5 +286,76 @@ export class BlockRepository {
       .selectAll()
       .where('hash', 'in', hashes)
       .execute();
+  }
+
+  /**
+   * Detect gaps in the blockchain sequence
+   *
+   * Returns array of {start, end} representing missing block ranges
+   */
+  async detectGaps(): Promise<Array<{start: bigint, end: bigint}>> {
+    const maxBlock = await this.getMaxBlockNumber();
+
+    if (!maxBlock || maxBlock < 1n) {
+      return [];
+    }
+
+    // SQL query to find gaps by identifying sequential breaks
+    const result = await this.db
+      .selectFrom('blocks as b1')
+      .select([
+        sql<number>`b1.number + 1`.as('gap_start'),
+        sql<number>`(
+          SELECT MIN(b2.number)
+          FROM blocks b2
+          WHERE b2.number > b1.number
+        ) - 1`.as('gap_end')
+      ])
+      .where('b1.number', '<', maxBlock)
+      .where(sql<boolean>`NOT EXISTS (
+        SELECT 1 FROM blocks b2 WHERE b2.number = b1.number + 1
+      )`)
+      .execute();
+
+    // Filter and convert to bigint
+    return result
+      .filter(row => row.gap_start !== null && row.gap_end !== null && row.gap_start <= row.gap_end)
+      .map(row => ({
+        start: BigInt(row.gap_start),
+        end: BigInt(row.gap_end)
+      }));
+  }
+
+  /**
+   * Get statistics about block coverage
+   */
+  async getBlockCoverageStats(): Promise<{
+    totalBlocks: number;
+    expectedBlocks: number;
+    missingBlocks: number;
+    coverage: number;
+  }> {
+    const maxBlock = await this.getMaxBlockNumber();
+    const totalBlocks = await this.getBlockCount();
+
+    if (!maxBlock || maxBlock < 1n) {
+      return {
+        totalBlocks,
+        expectedBlocks: 0,
+        missingBlocks: 0,
+        coverage: 100
+      };
+    }
+
+    const expectedBlocks = Number(maxBlock) + 1; // Block 0 to maxBlock
+    const missingBlocks = expectedBlocks - totalBlocks;
+    const coverage = totalBlocks > 0 ? (totalBlocks / expectedBlocks) * 100 : 0;
+
+    return {
+      totalBlocks,
+      expectedBlocks,
+      missingBlocks,
+      coverage: Math.round(coverage * 100) / 100
+    };
   }
 }

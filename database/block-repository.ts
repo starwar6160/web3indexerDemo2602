@@ -2,6 +2,7 @@ import { getDb } from './database-config';
 import { Block, NewBlock } from './database-types';
 import { sql } from 'kysely';
 import { validateBlocks, toDbBlock, ValidatedBlock } from './schemas';
+import { Transaction } from 'kysely';
 
 export class BlockRepository {
   private db = getDb();
@@ -43,7 +44,7 @@ export class BlockRepository {
   }
 
   /**
-   * 使用 Zod 验证并保存区块数据
+   * 使用 Zod 验证并保存区块数据 (with transaction isolation)
    * @param rawBlocks - 从 viem 获取的原始区块数据
    * @returns 保存的区块数量
    */
@@ -60,11 +61,34 @@ export class BlockRepository {
 
     // 转换为数据库格式并保存
     const dbBlocks = validatedBlocks.map(toDbBlock);
-    const saved = await this.createMany(dbBlocks);
+
+    // Use transaction for atomic batch write
+    const saved = await this.db.transaction().execute(async (trx) => {
+      return await trx
+        .insertInto('blocks')
+        .values(dbBlocks)
+        .returningAll()
+        .execute();
+    });
 
     console.log(`[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks (${rawBlocks.length - saved.length} invalid)`);
 
     return saved.length;
+  }
+
+  /**
+   * Verify blocks were written by querying them back
+   */
+  async verifyBlocksWritten(blockNumbers: bigint[]): Promise<boolean> {
+    if (blockNumbers.length === 0) return true;
+
+    const found = await this.db
+      .selectFrom('blocks')
+      .select('number')
+      .where('number', 'in', blockNumbers)
+      .execute();
+
+    return found.length === blockNumbers.length;
   }
 
   async findById(number: bigint): Promise<Block | undefined> {
@@ -138,6 +162,43 @@ export class BlockRepository {
       .where('number', '>=', start)
       .where('number', '<=', end)
       .orderBy('number', 'asc')
+      .execute();
+  }
+
+  /**
+   * Find blocks by multiple IDs
+   */
+  async findByIds(numbers: bigint[]): Promise<Block[]> {
+    if (numbers.length === 0) return [];
+    return await this.db
+      .selectFrom('blocks')
+      .selectAll()
+      .where('number', 'in', numbers)
+      .orderBy('number', 'asc')
+      .execute();
+  }
+
+  /**
+   * Delete all blocks after a specific block number (for reorg handling)
+   */
+  async deleteBlocksAfter(blockNumber: bigint): Promise<number> {
+    const result = await this.db
+      .deleteFrom('blocks')
+      .where('number', '>', blockNumber)
+      .execute();
+
+    return result.length; // Number of deleted rows
+  }
+
+  /**
+   * Get multiple blocks by their hashes
+   */
+  async findByHashes(hashes: string[]): Promise<Block[]> {
+    if (hashes.length === 0) return [];
+    return await this.db
+      .selectFrom('blocks')
+      .selectAll()
+      .where('hash', 'in', hashes)
       .execute();
   }
 }

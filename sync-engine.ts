@@ -1,5 +1,6 @@
-import { createPublicClient, http, Block } from 'viem';
+import { createPublicClient, http, Block, Log } from 'viem';
 import { BlockRepository } from './database/block-repository';
+import { LogRepository, TransactionLog } from './database/log-repository';
 import { validateBlocks, toDbBlock, ValidatedBlock } from './database/schemas';
 import { sql } from 'kysely';
 import pLimit from 'p-limit';
@@ -17,6 +18,7 @@ export interface SyncEngineConfig {
   confirmationDepth?: number; // Number of blocks to wait before confirming
   concurrency?: number; // P1 Fix: Parallel block fetching concurrency
   rpcTimeout?: number; // P4 Fix: RPC request timeout in ms
+  fetchLogs?: boolean; // P3 Fix: Fetch transaction logs atomically
 }
 
 /**
@@ -42,12 +44,14 @@ export class SyncEngine {
   private client: PublicClient;
   private clients: PublicClient[] = []; // P4 Fix: RPC pool for load balancing
   private blockRepository: BlockRepository;
+  private logRepository: LogRepository; // P3 Fix: Log repository
   private config: SyncEngineConfig;
   private currentRpcIndex = 0; // Round-robin index
 
   constructor(config: SyncEngineConfig) {
     this.config = config;
     this.blockRepository = new BlockRepository();
+    this.logRepository = new LogRepository(); // P3 Fix
 
     // P4 Fix: Support multiple RPC URLs with round-robin
     const rpcUrls = Array.isArray(config.rpcUrl) ? config.rpcUrl : [config.rpcUrl];

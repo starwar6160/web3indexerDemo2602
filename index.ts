@@ -5,7 +5,7 @@ import { validateBlock, toDbBlock } from './database/schemas';
 
 const ANVIL_RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '2000'); // 2 seconds
-const DB_SYNC_BATCH_SIZE = parseInt(process.env.DB_SYNC_BATCH_SIZE || '10'); // 同步批次大小
+const DB_SYNC_BATCH_SIZE = BigInt(parseInt(process.env.DB_SYNC_BATCH_SIZE || '10')); // 同步批次大小 - 使用 BigInt
 
 const client = createPublicClient({
   transport: http(ANVIL_RPC_URL),
@@ -62,11 +62,15 @@ async function syncMissingBlocks(): Promise<void> {
       // 分批同步以避免内存问题和 RPC 限制
       let currentBlock = startBlock;
       while (currentBlock <= latestBlock && isRunning) {
-        const batchEnd = BigInt(Math.min(Number(currentBlock) + DB_SYNC_BATCH_SIZE - 1, Number(latestBlock)));
+        // 使用三元表达式代替 Math.min，因为 Math.min 不支持 BigInt
+        const batchEnd = currentBlock + DB_SYNC_BATCH_SIZE - 1n <= latestBlock
+          ? currentBlock + DB_SYNC_BATCH_SIZE - 1n
+          : latestBlock;
+
         console.log(`[${new Date().toISOString()}] Syncing batch: ${currentBlock} to ${batchEnd}`);
 
         await syncBlockBatch(currentBlock, batchEnd);
-        currentBlock = batchEnd + BigInt(1);
+        currentBlock = batchEnd + 1n; // 使用 1n 代替 BigInt(1)
       }
     } else {
       console.log(`[${new Date().toISOString()}] Local database is ahead of chain, no sync needed`);
@@ -81,8 +85,9 @@ async function syncBlockBatch(startBlock: bigint, endBlock: bigint): Promise<voi
   const rawBlocks: unknown[] = [];
 
   try {
-    // 批量获取区块数据
-    for (let blockNumber = startBlock; blockNumber <= endBlock; blockNumber++) {
+    // 批量获取区块数据 - 使用 while 循环避免 BigInt 增量问题
+    let blockNumber = startBlock;
+    while (blockNumber <= endBlock) {
       try {
         const block = await client.getBlock({ blockNumber });
         rawBlocks.push(block);
@@ -93,6 +98,7 @@ async function syncBlockBatch(startBlock: bigint, endBlock: bigint): Promise<voi
         console.error(`[${new Date().toISOString()}] Failed to fetch block ${blockNumber}:`, error);
         // 继续尝试下一个区块，不要因为单个区块失败而中断整个批次
       }
+      blockNumber = blockNumber + 1n; // 使用 1n 进行 BigInt 增量
     }
 
     // 使用 Zod 验证并保存区块数据
@@ -125,8 +131,8 @@ async function pollNewBlocks(): Promise<void> {
         const newBlocksCount = currentBlock - localMaxBlock;
         console.log(`[${new Date().toISOString()}] Found ${newBlocksCount} new blocks to sync`);
 
-        // 同步新区块
-        await syncBlockBatch(localMaxBlock + BigInt(1), currentBlock);
+        // 同步新区块 - 使用 1n 代替 BigInt(1)
+        await syncBlockBatch(localMaxBlock + 1n, currentBlock);
       } else {
         console.log(`[${new Date().toISOString()}] No new blocks to sync`);
       }

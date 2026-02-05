@@ -91,7 +91,13 @@ export class BlockRepository {
       .limit(1)
       .executeTakeFirst();
 
-    return result?.number ?? null;
+    // 确保返回的是 BigInt 类型
+    const num = result?.number;
+    if (num === null || num === undefined) {
+      return null;
+    }
+    // 如果返回的是字符串或数字，转换为 BigInt
+    return typeof num === 'bigint' ? num : BigInt(num);
   }
 
   async getBlockCount(): Promise<number> {

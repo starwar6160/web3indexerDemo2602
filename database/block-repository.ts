@@ -44,7 +44,13 @@ export class BlockRepository {
   }
 
   /**
-   * 使用 Zod 验证并保存区块数据 (with transaction isolation)
+   * 使用 Zod 验证并保存区块数据 (with transaction isolation and upsert)
+   *
+   * CRITICAL FIX: Implements upsert semantics to handle:
+   * - Restarts after crashes (idempotent writes)
+   * - Reorg scenarios (hash updates)
+   * - Concurrent instances (conflict resolution)
+   *
    * @param rawBlocks - 从 viem 获取的原始区块数据
    * @returns 保存的区块数量
    */
@@ -62,16 +68,74 @@ export class BlockRepository {
     // 转换为数据库格式并保存
     const dbBlocks = validatedBlocks.map(toDbBlock);
 
-    // Use transaction for atomic batch write
+    let updatedCount = 0;
+    let insertedCount = 0;
+
+    // Use transaction for atomic batch write with upsert
     const saved = await this.db.transaction().execute(async (trx) => {
-      return await trx
-        .insertInto('blocks')
-        .values(dbBlocks)
-        .returningAll()
-        .execute();
+      const results: any[] = [];
+
+      for (const block of dbBlocks) {
+        // Try to insert first
+        try {
+          const result = await trx
+            .insertInto('blocks')
+            .values({
+              ...block,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .onConflict((oc) => oc
+              .column(['chain_id', 'number'])
+              .doUpdateSet({
+                // Only update if hash changed (reorg scenario)
+                hash: sql`EXCLUDED.hash`,
+                parent_hash: sql`EXCLUDED.parent_hash`,
+                timestamp: sql`EXCLUDED.timestamp`,
+                updated_at: new Date().toISOString(),
+              })
+              .where(({ eb }) => eb(
+                'blocks.hash', '!=', sql`${block.hash}`
+              ))
+            )
+            .returningAll()
+            .executeTakeFirst();
+
+          if (result) {
+            results.push(result);
+
+            // Track insert vs update
+            const existingHash = await trx
+              .selectFrom('blocks')
+              .where('chain_id', '=', block.chain_id || 1)
+              .where('number', '=', block.number)
+              .select('hash')
+              .executeTakeFirst();
+
+            if (existingHash && existingHash.hash !== block.hash) {
+              updatedCount++;
+            } else {
+              insertedCount++;
+            }
+          }
+        } catch (error) {
+          console.error(`[Repository] Failed to upsert block ${block.number}:`, error);
+          throw error;
+        }
+      }
+
+      return results;
     });
 
-    console.log(`[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks (${rawBlocks.length - saved.length} invalid)`);
+    console.log(
+      `[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks ` +
+      `(${insertedCount} inserted, ${updatedCount} updated, ${rawBlocks.length - saved.length} invalid)`
+    );
+
+    // Warn if we detected reorg (hash changes)
+    if (updatedCount > 0) {
+      console.warn(`[Repository] ⚠️  Detected ${updatedCount} hash changes (possible reorg)`);
+    }
 
     return saved.length;
   }

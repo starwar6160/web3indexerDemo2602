@@ -2,6 +2,9 @@
 /**
  * Chain reorganization handling utilities
  * Detects and handles blockchain reorganizations
+ *
+ * Designed with C++-style type safety: all numeric comparisons
+ * use explicit BigInt conversion to prevent JavaScript type coercion bugs.
  */
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -11,6 +14,7 @@ exports.detectReorg = detectReorg;
 exports.verifyChainContinuity = verifyChainContinuity;
 exports.handleReorg = handleReorg;
 const logger_1 = __importDefault(require("./logger"));
+const type_safety_1 = require("./type-safety");
 const DEFAULT_REORG_OPTIONS = {
     maxReorgDepth: 100, // Maximum reorg depth to handle
     onReorgDetected: async (depth, commonAncestor) => {
@@ -125,24 +129,25 @@ async function verifyChainContinuity(blockRepository, blockNumber, parentHash) {
         throw new Error(`Parent block ${parentHash} not found for block ${blockNumber}. ` +
             `Possible reorg or out-of-order data.`);
     }
-    // Force BigInt conversion to avoid type coercion pitfalls
-    // NEVER trust JavaScript's implicit type conversion in Web3
-    const parentBlockNumber = BigInt(parentBlock.number);
-    const expectedParentNumber = BigInt(blockNumber - 1n);
-    // Log types for debugging (prevent "log hallucination")
+    // C++-style explicit type conversion
+    // Like static_cast<int64_t> before comparison
+    const parentBlockNumber = (0, type_safety_1.assertBigInt)(parentBlock.number, 'parentBlock.number');
+    const expectedParentNumber = (0, type_safety_1.toBigInt)(blockNumber - 1n);
+    // Detailed logging for type debugging (prevents "log hallucination")
     logger_1.default.trace({
         blockNumber: blockNumber.toString(),
         blockNumberType: typeof blockNumber,
         parentBlockNumber: parentBlockNumber.toString(),
-        parentBlockNumberType: typeof parentBlock.number,
+        parentBlockNumberOriginalType: typeof parentBlock.number,
         expectedParentNumber: expectedParentNumber.toString(),
-        expectedParentNumberType: typeof expectedParentNumber,
+        expectedParentNumberType: 'bigint',
         comparison: parentBlockNumber === expectedParentNumber,
     }, 'Chain continuity type check');
     if (parentBlockNumber !== expectedParentNumber) {
-        throw new Error(`Parent block number mismatch: expected ${expectedParentNumber} (${typeof expectedParentNumber}), ` +
-            `got ${parentBlockNumber} (${typeof parentBlock.number}). ` +
-            `This indicates data corruption or reorg.`);
+        throw new Error(`Parent block number mismatch: expected ${expectedParentNumber} (bigint), ` +
+            `got ${parentBlockNumber} (from ${typeof parentBlock.number}). ` +
+            `This indicates data corruption or reorg. ` +
+            `Context: verifying block ${blockNumber} against parent ${parentHash}`);
     }
 }
 /**

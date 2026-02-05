@@ -1,10 +1,14 @@
 /**
  * Chain reorganization handling utilities
  * Detects and handles blockchain reorganizations
+ *
+ * Designed with C++-style type safety: all numeric comparisons
+ * use explicit BigInt conversion to prevent JavaScript type coercion bugs.
  */
 
 import { BlockRepository } from '../database/block-repository';
 import logger from './logger';
+import { toBigInt, assertBigInt } from './type-safety';
 
 export interface ReorgDetectionResult {
   detected: boolean;
@@ -182,27 +186,28 @@ export async function verifyChainContinuity(
     );
   }
 
-  // Force BigInt conversion to avoid type coercion pitfalls
-  // NEVER trust JavaScript's implicit type conversion in Web3
-  const parentBlockNumber = BigInt(parentBlock.number);
-  const expectedParentNumber = BigInt(blockNumber - 1n);
+  // C++-style explicit type conversion
+  // Like static_cast<int64_t> before comparison
+  const parentBlockNumber = assertBigInt(parentBlock.number, 'parentBlock.number');
+  const expectedParentNumber = toBigInt(blockNumber - 1n);
 
-  // Log types for debugging (prevent "log hallucination")
+  // Detailed logging for type debugging (prevents "log hallucination")
   logger.trace({
     blockNumber: blockNumber.toString(),
     blockNumberType: typeof blockNumber,
     parentBlockNumber: parentBlockNumber.toString(),
-    parentBlockNumberType: typeof parentBlock.number,
+    parentBlockNumberOriginalType: typeof parentBlock.number,
     expectedParentNumber: expectedParentNumber.toString(),
-    expectedParentNumberType: typeof expectedParentNumber,
+    expectedParentNumberType: 'bigint',
     comparison: parentBlockNumber === expectedParentNumber,
   }, 'Chain continuity type check');
 
   if (parentBlockNumber !== expectedParentNumber) {
     throw new Error(
-      `Parent block number mismatch: expected ${expectedParentNumber} (${typeof expectedParentNumber}), ` +
-      `got ${parentBlockNumber} (${typeof parentBlock.number}). ` +
-      `This indicates data corruption or reorg.`
+      `Parent block number mismatch: expected ${expectedParentNumber} (bigint), ` +
+      `got ${parentBlockNumber} (from ${typeof parentBlock.number}). ` +
+      `This indicates data corruption or reorg. ` +
+      `Context: verifying block ${blockNumber} against parent ${parentHash}`
     );
   }
 }

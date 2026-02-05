@@ -2,17 +2,34 @@ import { ColumnType, Generated, Insertable, Selectable, Updateable } from 'kysel
 
 export interface Database {
   blocks: BlockTable;
+  sync_checkpoints: CheckpointTable;
 }
 
 export interface BlockTable {
-  number: ColumnType<bigint, never, bigint>;
+  number: ColumnType<bigint, string | number, bigint>;
   hash: string;
-  timestamp: ColumnType<number, never, number>;
+  timestamp: ColumnType<bigint, string | number, bigint>;
   parent_hash: string;
-  created_at: ColumnType<Date, string | undefined, Date>;
-  updated_at: ColumnType<Date, string | undefined, Date>;
+  chain_id: ColumnType<bigint, string | number, bigint>;
+  created_at: ColumnType<Date, string, Date>;
+  updated_at: ColumnType<Date, string, Date>;
+}
+
+export interface CheckpointTable {
+  id: Generated<number>;
+  name: string;
+  block_number: ColumnType<bigint, string | number, bigint>;
+  block_hash: string;
+  synced_at: ColumnType<Date, string, Date>;
+  metadata: ColumnType<Record<string, any> | null, string | null, Record<string, any> | null>;
+  created_at: ColumnType<Date, string, Date>;
+  updated_at: ColumnType<Date, string, Date>;
 }
 
 export type Block = Selectable<BlockTable>;
 export type NewBlock = Insertable<BlockTable>;
 export type BlockUpdate = Updateable<BlockTable>;
+
+export type Checkpoint = Selectable<CheckpointTable>;
+export type NewCheckpoint = Insertable<CheckpointTable>;
+export type CheckpointUpdate = Updateable<CheckpointTable>;

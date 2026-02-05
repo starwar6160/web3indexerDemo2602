@@ -5,10 +5,20 @@ import { z } from 'zod';
  * 用于从 viem 获取的原始数据进行验证和类型转换
  */
 export const BlockSchema = z.object({
-  number: z.bigint(),
-  hash: z.string().startsWith('0x'),
-  timestamp: z.coerce.number(), // 自动处理 bigint -> number
-  parentHash: z.string().startsWith('0x'),
+  number: z.bigint().min(0n, 'Block number must be non-negative'),
+  hash: z.string()
+    .startsWith('0x', 'Hash must start with 0x')
+    .length(66, 'Hash must be 66 characters (0x + 64 hex chars)')
+    .regex(/^0x[a-f0-9]{64}$/, 'Hash must contain only hexadecimal characters'),
+  timestamp: z.coerce.bigint().min(0n, 'Timestamp must be non-negative'),
+  parentHash: z.string()
+    .startsWith('0x', 'Parent hash must start with 0x')
+    .length(66, 'Parent hash must be 66 characters')
+    .regex(/^0x[a-f0-9]{64}$/, 'Parent hash must contain only hexadecimal characters')
+    .refine(hash => hash !== '0x0000000000000000000000000000000000000000000000000000000000000000', {
+      message: 'Parent hash cannot be zero address (except for genesis block)',
+    })
+    .optional(), // Genesis block may not have parent hash
 });
 
 /**
@@ -70,10 +80,12 @@ export function validateBlocks(blocks: unknown[]): ValidatedBlock[] {
  * @returns 数据库区块数据
  */
 export function toDbBlock(block: ValidatedBlock) {
+  // 将 bigint timestamp 转换为 number 用于存储（如果还在使用 integer）
+  // 迁移到 bigint 后可以直接使用
   return {
     number: block.number,
     hash: block.hash,
-    timestamp: block.timestamp,
-    parent_hash: block.parentHash,
+    timestamp: Number(block.timestamp), // 转换为 number（兼容现有 schema）
+    parent_hash: block.parentHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
   };
 }

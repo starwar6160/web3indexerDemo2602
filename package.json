@@ -1,0 +1,21 @@
+{
+  "name": "web3-indexer-demo",
+  "version": "1.0.0",
+  "description": "Web3 backend indexer demo with Anvil and PostgreSQL",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "viem": "^1.0.0",
+    "web3": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0"
+  }
+}

@@ -1,3 +1,6 @@
+// 加载环境变量 - 必须在其他导入之前
+import 'dotenv/config';
+
 import { createPublicClient, http } from 'viem';
 import { closeDbConnection, createDbConnection } from './database/database-config';
 import { BlockRepository } from './database/block-repository';
@@ -5,6 +8,7 @@ import logger from './utils/logger';
 import { config } from './utils/config';
 import { setupGlobalErrorHandlers, setupGracefulShutdown } from './utils/error-handlers';
 import { startHealthServer } from './utils/health-server';
+import { ErrorHandler } from './utils/error-classifier';
 
 const client = createPublicClient({
   transport: http(config.RPC_URL),
@@ -87,10 +91,12 @@ async function syncMissingBlocks(): Promise<void> {
 }
 
 /**
- * 批量同步区块
+ * 批量同步区块（改进的错误处理）
  */
 async function syncBlockBatch(startBlock: bigint, endBlock: bigint): Promise<void> {
   const rawBlocks: unknown[] = [];
+  let successCount = 0;
+  let failureCount = 0;
 
   try {
     // 批量获取区块数据
@@ -99,36 +105,79 @@ async function syncBlockBatch(startBlock: bigint, endBlock: bigint): Promise<voi
       try {
         const block = await client.getBlock({ blockNumber });
         rawBlocks.push(block);
+        successCount++;
+
         logger.trace({ blockNumber: blockNumber.toString(), hash: block.hash }, 'Fetched block');
       } catch (error) {
-        logger.error({
+        failureCount++;
+
+        // 使用统一的错误处理器，类型断言为 Error
+        const handling = ErrorHandler.handleError(error as Error, {
           blockNumber: blockNumber.toString(),
-          error,
-        }, 'Failed to fetch block');
-        // 继续尝试下一个区块
+        });
+
+        if (handling.shouldShutdown) {
+          logger.error({ blockNumber: blockNumber.toString() }, 'Critical error, shutting down');
+          throw error;
+        }
+
+        // 如果应该跳过，继续下一个区块
+        if (!handling.shouldContinue) {
+          logger.warn({ blockNumber: blockNumber.toString() }, 'Skipping block due to error');
+        }
       }
       blockNumber = blockNumber + 1n;
     }
 
+    // 记录获取结果
+    if (failureCount > 0) {
+      logger.warn({
+        startBlock: startBlock.toString(),
+        endBlock: endBlock.toString(),
+        successCount,
+        failureCount,
+      }, 'Block fetching completed with some failures');
+    }
+
     // 使用 Zod 验证并保存区块数据
     if (rawBlocks.length > 0) {
-      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
-      if (savedCount > 0) {
-        logger.info({
+      try {
+        const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+
+        if (savedCount > 0) {
+          logger.info({
+            startBlock: startBlock.toString(),
+            endBlock: endBlock.toString(),
+            savedCount,
+            validationRate: `${((savedCount / rawBlocks.length) * 100).toFixed(1)}%`,
+          }, '✅ Batch sync completed');
+        } else {
+          logger.warn('No valid blocks to save in this batch');
+        }
+      } catch (error) {
+        // 数据库保存错误使用统一处理，类型断言为 Error
+        const handling = ErrorHandler.handleError(error as Error, {
           startBlock: startBlock.toString(),
           endBlock: endBlock.toString(),
-          savedCount,
-        }, '✅ Batch sync completed');
-      } else {
-        logger.warn('No valid blocks to save in this batch');
+          blocksAttempted: rawBlocks.length,
+        });
+
+        if (!handling.shouldContinue) {
+          throw error;
+        }
       }
     } else {
-      logger.warn('No blocks fetched in this batch');
+      logger.warn({
+        startBlock: startBlock.toString(),
+        endBlock: endBlock.toString(),
+      }, 'No blocks fetched in this batch');
     }
   } catch (error) {
     logger.error({
       startBlock: startBlock.toString(),
       endBlock: endBlock.toString(),
+      successCount,
+      failureCount,
       error,
     }, '❌ Block batch sync failed');
     throw error;

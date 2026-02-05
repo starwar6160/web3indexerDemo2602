@@ -1,3 +1,6 @@
+// Load environment variables - must be before other imports
+import 'dotenv/config';
+
 import { createPublicClient, http } from 'viem';
 import { closeDbConnection, createDbConnection } from './database/database-config';
 import { BlockRepository } from './database/block-repository';
@@ -248,11 +251,23 @@ async function syncBlockBatch(
       // Verify chain continuity before saving
       for (const block of rawBlocks) {
         if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block) {
-          await verifyChainContinuity(
-            blockRepository,
-            block.number as bigint,
-            block.parentHash as string
-          );
+          try {
+            await verifyChainContinuity(
+              blockRepository,
+              block.number as bigint,
+              block.parentHash as string
+            );
+          } catch (error) {
+            logger.error(
+              {
+                blockNumber: (block.number as bigint).toString(),
+                parentHash: block.parentHash as string,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              'Chain continuity verification failed'
+            );
+            throw error;
+          }
         }
       }
 

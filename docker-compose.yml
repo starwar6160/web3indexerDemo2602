@@ -25,24 +25,28 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  indexer:
-    build: .
-    container_name: web3-indexer-app
-    depends_on:
-      - anvil
-      - postgres
-    ports:
-      - "3000:3000"  # 健康检查端口
-    environment:
-      - RPC_URL=http://anvil:8545
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
-      - POLL_INTERVAL_MS=2000
-      - DB_SYNC_BATCH_SIZE=10
-      - MAX_RETRIES=3
-      - LOG_LEVEL=info
-      - NODE_ENV=production
-      - HEALTH_CHECK_PORT=3000
-    restart: unless-stopped
+  # DISABLED: indexer 现在在 WSL2 原生环境运行
+  # 原因: WSL2 运行的 index-production.js 是最新的"战舰"级代码
+  # 而 Docker 容器里的代码是旧版本,已不再使用
+  #
+  # indexer:
+  #   build: .
+  #   container_name: web3-indexer-app
+  #   depends_on:
+  #     - anvil
+  #     - postgres
+  #   ports:
+  #     - "3000:3000"  # 健康检查端口
+  #   environment:
+  #     - RPC_URL=http://anvil:8545
+  #     - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
+  #     - POLL_INTERVAL_MS=2000
+  #     - DB_SYNC_BATCH_SIZE=10
+  #     - MAX_RETRIES=3
+  #     - LOG_LEVEL=info
+  #     - NODE_ENV=production
+  #     - HEALTH_CHECK_PORT=3000
+  #   restart: unless-stopped
 
   # 管理容器 - 用于执行脚本和管理任务
   workspace:

@@ -35,7 +35,7 @@ services:
       - "3000:3000"  # 健康检查端口
     environment:
       - RPC_URL=http://anvil:8545
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
       - POLL_INTERVAL_MS=2000
       - DB_SYNC_BATCH_SIZE=10
       - MAX_RETRIES=3

@@ -205,8 +205,12 @@ async function syncBlockBatch(startBlock, endBlock) {
                 logger_1.default.warn('No blocks fetched in this batch');
                 return;
             }
-            // Verify chain continuity before saving
-            for (const block of rawBlocks) {
+            // Save in transaction FIRST (so findByHash can find blocks in current batch)
+            const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+            // THEN verify chain continuity for subsequent blocks
+            // This allows findByHash to find parent blocks within the current batch
+            for (let i = 1; i < rawBlocks.length; i++) {
+                const block = rawBlocks[i];
                 if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block) {
                     try {
                         await (0, reorg_handler_1.verifyChainContinuity)(blockRepository, block.number, block.parentHash);
@@ -216,13 +220,12 @@ async function syncBlockBatch(startBlock, endBlock) {
                             blockNumber: block.number.toString(),
                             parentHash: block.parentHash,
                             error: error instanceof Error ? error.message : String(error),
-                        }, 'Chain continuity verification failed');
+                        }, 'Chain continuity verification failed after save');
+                        // Rollback by throwing - transaction will handle it
                         throw error;
                     }
                 }
             }
-            // Save in transaction
-            const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
             // Verify writes
             const blockNumbers = rawBlocks
                 .filter((b) => b !== null && typeof b === 'object')

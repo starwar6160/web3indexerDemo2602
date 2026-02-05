@@ -248,8 +248,13 @@ async function syncBlockBatch(
         return;
       }
 
-      // Verify chain continuity before saving
-      for (const block of rawBlocks) {
+      // Save in transaction FIRST (so findByHash can find blocks in current batch)
+      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+
+      // THEN verify chain continuity for subsequent blocks
+      // This allows findByHash to find parent blocks within the current batch
+      for (let i = 1; i < rawBlocks.length; i++) {
+        const block = rawBlocks[i];
         if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block) {
           try {
             await verifyChainContinuity(
@@ -264,15 +269,13 @@ async function syncBlockBatch(
                 parentHash: block.parentHash as string,
                 error: error instanceof Error ? error.message : String(error),
               },
-              'Chain continuity verification failed'
+              'Chain continuity verification failed after save'
             );
+            // Rollback by throwing - transaction will handle it
             throw error;
           }
         }
       }
-
-      // Save in transaction
-      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
 
       // Verify writes
       const blockNumbers = rawBlocks

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createPublicClient, http } from 'viem';
 import logger from './logger';
 
 /**
@@ -38,9 +39,69 @@ const EnvSchema = z.object({
 export type Env = z.infer<typeof EnvSchema>;
 
 /**
+ * 验证 RPC URL 连通性
+ */
+async function validateRpcConnectivity(rpcUrl: string): Promise<void> {
+  try {
+    const client = createPublicClient({
+      transport: http(rpcUrl, {
+        timeout: 10_000, // 10 秒超时
+      }),
+    });
+
+    const startTime = Date.now();
+    await client.getBlockNumber();
+    const latency = Date.now() - startTime;
+
+    logger.info(
+      { rpcUrl, latency: `${latency}ms` },
+      '✅ RPC URL connectivity validated'
+    );
+  } catch (error) {
+    logger.error(
+      { rpcUrl, error: error instanceof Error ? error.message : String(error) },
+      '❌ RPC URL connectivity check failed'
+    );
+    throw new Error(
+      `RPC URL ${rpcUrl} is not reachable. Please check if the RPC node is running.`
+    );
+  }
+}
+
+/**
  * 验证并加载环境变量
  * 任何验证失败都会立即终止程序
  */
+async function validateEnvAsync(): Promise<Env> {
+  try {
+    const env = EnvSchema.parse(process.env);
+
+    // 验证 RPC 连通性
+    await validateRpcConnectivity(env.RPC_URL);
+
+    logger.info({ env: { ...env, DATABASE_URL: '***REDACTED***' } }, '✅ Environment variables validated');
+    return env;
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      logger.error({
+        errors: error.errors.map(e => ({
+          path: e.path.join('.'),
+          message: e.message,
+          code: e.code,
+        })),
+      }, '❌ Fatal: Environment variable validation failed');
+      console.error('\n❌ Invalid environment configuration:\n');
+      error.errors.forEach((err) => {
+        console.error(`  ${err.path.join('.')}: ${err.message}`);
+      });
+      console.error('\nPlease fix your .env file or docker-compose.yml\n');
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+// 同步版本用于兼容旧代码
 function validateEnv(): Env {
   try {
     const env = EnvSchema.parse(process.env);
@@ -67,3 +128,4 @@ function validateEnv(): Env {
 }
 
 export const config = validateEnv();
+export { validateEnvAsync };

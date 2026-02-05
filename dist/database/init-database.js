@@ -52,6 +52,18 @@ async function initDatabase() {
         catch (error) {
             // 索引可能已存在
         }
+        // parent_hash 索引 - 用于 reorg 检测时快速查找父区块
+        try {
+            await db.schema
+                .createIndex('idx_blocks_parent_hash')
+                .on('blocks')
+                .column('parent_hash')
+                .execute();
+            console.log('[INIT] ✅ Parent hash index created (improves reorg performance)');
+        }
+        catch (error) {
+            // 索引可能已存在
+        }
         console.log('[INIT] ✅ Database initialization completed');
     }
     catch (error) {

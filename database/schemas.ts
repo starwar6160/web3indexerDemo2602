@@ -5,12 +5,19 @@ import { z } from 'zod';
  * 用于从 viem 获取的原始数据进行验证和类型转换
  */
 export const BlockSchema = z.object({
-  number: z.bigint().min(0n, 'Block number must be non-negative'),
+  number: z.bigint()
+    .min(0n, 'Block number must be non-negative')
+    .max(2n ** 64n - 1n, 'Block number exceeds safe range'), // 防止 uint256 溢出
   hash: z.string()
     .startsWith('0x', 'Hash must start with 0x')
     .length(66, 'Hash must be 66 characters (0x + 64 hex chars)')
     .regex(/^0x[a-f0-9]{64}$/, 'Hash must contain only hexadecimal characters'),
-  timestamp: z.coerce.bigint().min(0n, 'Timestamp must be non-negative'),
+  timestamp: z.coerce.bigint()
+    .min(0n, 'Timestamp must be non-negative')
+    .max(BigInt(Math.floor(Date.now() / 1000) + 86400), 'Timestamp is too far in the future (more than 24h)')
+    .refine(ts => ts < BigInt(Math.floor(Date.now() / 1000) + 86400), {
+      message: 'Timestamp cannot be more than 24 hours in the future',
+    }),
   parentHash: z.string()
     .startsWith('0x', 'Parent hash must start with 0x')
     .length(66, 'Parent hash must be 66 characters')

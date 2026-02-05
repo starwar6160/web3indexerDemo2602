@@ -1,6 +1,6 @@
 import http from 'http';
 import { URL } from 'url';
-import logger from './logger';
+import logger, { generateTraceId } from './logger';
 import { createDbConnection } from '../database/database-config';
 import { createPublicClient, http as viemHttp } from 'viem';
 import { config } from './config';
@@ -14,6 +14,49 @@ interface HealthStatus {
     rpc: { status: 'pass' | 'fail'; latency?: number; error?: string; blockNumber?: string };
     sync: { status: 'up' | 'down' | 'behind'; lag?: number; localMax?: string; chainMax?: string };
   };
+}
+
+interface Metrics {
+  indexer: {
+    uptime: number;
+    memory: NodeJS.MemoryUsage;
+    blockCount: number;
+    localMax: string;
+    chainMax: string;
+    syncLag: number;
+    syncStatus: 'up_to_date' | 'behind' | 'critical';
+  };
+  rpc: {
+    latency: number;
+    errorRate: number;
+    totalRequests: number;
+    failedRequests: number;
+  };
+  system: {
+    platform: string;
+    nodeVersion: string;
+    arch: string;
+    cpus: number;
+  };
+  config: {
+    pollInterval: number;
+    batchSize: string;
+  };
+}
+
+// Global metrics tracking
+let rpcMetrics = {
+  totalRequests: 0,
+  failedRequests: 0,
+  totalLatency: 0,
+};
+
+export function recordRpcCall(success: boolean, latency: number): void {
+  rpcMetrics.totalRequests++;
+  if (!success) {
+    rpcMetrics.failedRequests++;
+  }
+  rpcMetrics.totalLatency += latency;
 }
 
 /**
@@ -56,9 +99,18 @@ export function createHealthServer() {
         res.end(JSON.stringify({ error: 'Failed to collect metrics' }));
       }
     } else if (pathname === '/ready') {
-      // Kubernetes readiness probe
-      res.writeHead(200);
-      res.end(JSON.stringify({ status: 'ready' }));
+      // Kubernetes readiness probe - check if database is ready
+      try {
+        await checkReadiness();
+        res.writeHead(200);
+        res.end(JSON.stringify({ status: 'ready' }));
+      } catch (error) {
+        res.writeHead(503);
+        res.end(JSON.stringify({
+          status: 'not ready',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        }));
+      }
     } else {
       res.writeHead(404);
       res.end(JSON.stringify({ error: 'Not found' }));
@@ -153,9 +205,20 @@ async function getHealthStatus(rpcClient: ReturnType<typeof createPublicClient>)
 }
 
 /**
+ * Check readiness - database connection only
+ */
+async function checkReadiness(): Promise<void> {
+  const { BlockRepository } = await import('../database/block-repository');
+  const repo = new BlockRepository();
+
+  // Simple query to verify database is ready
+  await repo.getBlockCount();
+}
+
+/**
  * 获取详细指标
  */
-async function getMetrics(rpcClient: ReturnType<typeof createPublicClient>) {
+async function getMetrics(rpcClient: ReturnType<typeof createPublicClient>): Promise<Metrics> {
   const { BlockRepository } = await import('../database/block-repository');
   const repo = new BlockRepository();
 
@@ -167,6 +230,14 @@ async function getMetrics(rpcClient: ReturnType<typeof createPublicClient>) {
 
   const lag = localMax !== null ? Number(chainMax - localMax) : 0;
 
+  // Calculate RPC metrics
+  const avgLatency = rpcMetrics.totalRequests > 0
+    ? rpcMetrics.totalLatency / rpcMetrics.totalRequests
+    : 0;
+  const errorRate = rpcMetrics.totalRequests > 0
+    ? (rpcMetrics.failedRequests / rpcMetrics.totalRequests) * 100
+    : 0;
+
   return {
     indexer: {
       uptime: process.uptime(),
@@ -176,6 +247,12 @@ async function getMetrics(rpcClient: ReturnType<typeof createPublicClient>) {
       chainMax: chainMax.toString(),
       syncLag: lag,
       syncStatus: lag <= 10 ? 'up_to_date' : lag <= 100 ? 'behind' : 'critical',
+    },
+    rpc: {
+      latency: Math.round(avgLatency),
+      errorRate: Math.round(errorRate * 100) / 100,
+      totalRequests: rpcMetrics.totalRequests,
+      failedRequests: rpcMetrics.failedRequests,
     },
     system: {
       platform: process.platform,

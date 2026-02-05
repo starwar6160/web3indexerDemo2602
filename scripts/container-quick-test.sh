@@ -26,7 +26,7 @@ for i in {1..3}; do
       }],
       \"id\":$i
     }" \
-    http://anvil:8545)
+    http://localhost:58545)
 
   # 检查是否有错误
   if echo "$RESPONSE" | grep -q '"error"'; then

@@ -14,7 +14,7 @@ while true; do
   # 获取链上最新区块
   CHAIN_BLOCK=$(curl -s -X POST -H "Content-Type: application/json" \
     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-    http://anvil:8545 | grep -o '"result":"0x[^"]*"' | cut -d'"' -f4)
+    http://localhost:58545 | grep -o '"result":"0x[^"]*"' | cut -d'"' -f4)
 
   # 检查数据库中的区块数量
   DB_COUNT=$(psql -U postgres -h db -d web3_indexer -t -c "SELECT COUNT(*) FROM blocks;" 2>/dev/null | tr -d ' ')

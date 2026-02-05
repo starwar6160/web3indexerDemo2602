@@ -38,7 +38,7 @@ while true; do
           }],
           "id":1
         }' \
-        http://anvil:8545)
+        http://localhost:58545)
 
       TX_HASH=$(echo "$RESPONSE" | grep -o '"result":"0x[^"]*"' | cut -d'"' -f4)
       if [ -n "$TX_HASH" ]; then

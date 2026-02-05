@@ -1,0 +1,496 @@
+// Load environment variables - must be before other imports
+import 'dotenv/config';
+
+import { createPublicClient, http } from 'viem';
+import { closeDbConnection, createDbConnection } from './database/database-config';
+import { BlockRepository } from './database/block-repository';
+import logger, { logSamplers, generateTraceId, withTraceId } from './utils/logger';
+import { config } from './utils/config';
+import { setupGlobalErrorHandlers, setupGracefulShutdown } from './utils/error-handlers';
+import { startHealthServer, recordRpcCall } from './utils/health-server';
+import { retryWithBackoffSelective } from './utils/retry';
+import { TokenBucketRateLimiter } from './utils/rate-limiter';
+import {
+  detectReorg,
+  verifyChainContinuity,
+  handleReorg,
+} from './utils/reorg-handler';
+
+const client = createPublicClient({
+  transport: http(config.RPC_URL),
+});
+
+let blockRepository: BlockRepository;
+let isRunning = true;
+
+// Rate limiter: 10 requests per second with burst of 20
+const rateLimiter = new TokenBucketRateLimiter({
+  tokensPerInterval: 10,
+  intervalMs: 1000,
+  maxBurstTokens: 20,
+});
+
+/**
+ * Wrapper for RPC calls with rate limiting, metrics, and retries
+ */
+async function rpcCallWithMetrics<T>(
+  operation: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const startTime = Date.now();
+
+  // Apply rate limiting
+  await rateLimiter.consume(1);
+
+  try {
+    const result = await retryWithBackoffSelective(
+      fn,
+      (error) => {
+        // Retry on network errors and rate limits
+        const errorMessage = error.message.toLowerCase();
+        return (
+          errorMessage.includes('network') ||
+          errorMessage.includes('timeout') ||
+          errorMessage.includes('rate limit') ||
+          errorMessage.includes('429')
+        );
+      },
+      {
+        maxRetries: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 5000,
+      }
+    );
+
+    if (!result.success) {
+      throw result.error || new Error('RPC call failed');
+    }
+
+    const latency = Date.now() - startTime;
+    recordRpcCall(true, latency);
+
+    return result.data as T;
+  } catch (error) {
+    const latency = Date.now() - startTime;
+    recordRpcCall(false, latency);
+
+    logger.error({ error, operation }, 'RPC call failed');
+    throw error;
+  }
+}
+
+/**
+ * 初始化数据库连接
+ */
+async function initializeDatabase(): Promise<void> {
+  logger.info('Initializing database connection...');
+
+  try {
+    await createDbConnection();
+    blockRepository = new BlockRepository();
+
+    // 尝试查询，如果表不存在则创建
+    try {
+      await blockRepository.getBlockCount();
+      logger.info('✅ Database tables already exist');
+    } catch (error) {
+      logger.warn('⚠️  Blocks table not found, creating...');
+      const { initDatabase } = await import('./database/init-database');
+      await initDatabase();
+      logger.info('✅ Database tables created');
+    }
+
+    logger.info('✅ Database connection established');
+  } catch (error) {
+    logger.error({ error }, '❌ Database initialization failed');
+    throw error;
+  }
+}
+
+/**
+ * 同步单个区块(带重组检测和验证)
+ */
+async function syncBlockWithValidation(
+  blockNumber: bigint,
+  parentHash?: string
+): Promise<boolean> {
+  try {
+    // Fetch block with rate limiting and retry
+    const block = await rpcCallWithMetrics(
+      `getBlock-${blockNumber}`,
+      () => client.getBlock({ blockNumber })
+    );
+
+    // Verify chain continuity (check parent exists)
+    await verifyChainContinuity(blockRepository, block.number, block.parentHash);
+
+    // Check for reorg if we have previous block info
+    if (parentHash) {
+      const reorgResult = await detectReorg(
+        blockRepository,
+        block.hash,
+        block.number,
+        parentHash
+      );
+
+      if (reorgResult.detected && reorgResult.commonAncestor !== undefined) {
+        logger.warn(
+          {
+            blockNumber: block.number.toString(),
+            depth: reorgResult.reorgDepth,
+            commonAncestor: reorgResult.commonAncestor.toString(),
+          },
+          'Reorganization detected, rolling back...'
+        );
+
+        await handleReorg(blockRepository, reorgResult.commonAncestor);
+
+        // After rollback, re-verify continuity
+        await verifyChainContinuity(blockRepository, block.number, block.parentHash);
+      }
+    }
+
+    // Save validated block
+    const saved = await blockRepository.saveValidatedBlocks([block]);
+
+    // Verify write
+    if (saved > 0) {
+      const verified = await blockRepository.verifyBlocksWritten([block.number]);
+      if (!verified) {
+        throw new Error(`Block ${block.number} write verification failed`);
+      }
+
+      // Sampled logging for high-frequency block sync
+      if (logSamplers.perBlock.shouldLog()) {
+        const suppressed = logSamplers.perBlock.getSuppressedCount();
+        logger.info(
+          {
+            blockNumber: block.number.toString(),
+            hash: block.hash,
+            suppressedLogs: suppressed,
+          },
+          '✅ Block synced'
+        );
+      }
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    logger.error(
+      { error, blockNumber: blockNumber.toString() },
+      'Failed to sync block'
+    );
+    throw error;
+  }
+}
+
+/**
+ * 批量同步区块(带事务和重组检测)
+ */
+async function syncBlockBatch(
+  startBlock: bigint,
+  endBlock: bigint
+): Promise<void> {
+  const traceId = generateTraceId();
+
+  await withTraceId(async () => {
+    logger.info(
+      {
+        startBlock: startBlock.toString(),
+        endBlock: endBlock.toString(),
+        count: (endBlock - startBlock + 1n).toString(),
+      },
+      'Starting batch sync'
+    );
+
+    const rawBlocks: unknown[] = [];
+    let lastParentHash: string | undefined;
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      // Fetch blocks with rate limiting
+      let blockNumber = startBlock;
+      while (blockNumber <= endBlock) {
+        try {
+          const block = await rpcCallWithMetrics(
+            `getBlock-${blockNumber}`,
+            () => client.getBlock({ blockNumber })
+          );
+
+          rawBlocks.push(block);
+
+          // Store parent hash for next iteration
+          lastParentHash = block.parentHash;
+
+          // Sampled logging
+          if (logSamplers.perBlock.shouldLog()) {
+            logger.trace(
+              { blockNumber: blockNumber.toString(), hash: block.hash },
+              'Fetched block'
+            );
+          }
+
+          blockNumber = blockNumber + 1n;
+        } catch (error) {
+          logger.error(
+            { error, blockNumber: blockNumber.toString() },
+            'Failed to fetch block'
+          );
+          failCount++;
+          blockNumber = blockNumber + 1n;
+        }
+      }
+
+      if (rawBlocks.length === 0) {
+        logger.warn('No blocks fetched in this batch');
+        return;
+      }
+
+      // Save in transaction FIRST (so findByHash can find blocks in current batch)
+      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+
+      // THEN verify chain continuity for subsequent blocks
+      // This allows findByHash to find parent blocks within the current batch
+      for (let i = 1; i < rawBlocks.length; i++) {
+        const block = rawBlocks[i];
+        if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block) {
+          try {
+            await verifyChainContinuity(
+              blockRepository,
+              block.number as bigint,
+              block.parentHash as string
+            );
+          } catch (error) {
+            logger.error(
+              {
+                blockNumber: (block.number as bigint).toString(),
+                parentHash: block.parentHash as string,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              'Chain continuity verification failed after save'
+            );
+            // Rollback by throwing - transaction will handle it
+            throw error;
+          }
+        }
+      }
+
+      // Verify writes
+      const blockNumbers = rawBlocks
+        .filter((b): b is object => b !== null && typeof b === 'object')
+        .map((b: any) => b.number as bigint);
+
+      if (blockNumbers.length > 0) {
+        const verified = await blockRepository.verifyBlocksWritten(blockNumbers);
+
+        if (!verified) {
+          throw new Error('Block write verification failed after batch save');
+        }
+      }
+
+      successCount = savedCount;
+
+      logger.info(
+        {
+          startBlock: startBlock.toString(),
+          endBlock: endBlock.toString(),
+          successCount,
+          failCount,
+        },
+        '✅ Batch sync completed'
+      );
+    } catch (error) {
+      logger.error(
+        {
+          startBlock: startBlock.toString(),
+          endBlock: endBlock.toString(),
+          error,
+        },
+        '❌ Block batch sync failed'
+      );
+      throw error;
+    }
+  });
+}
+
+/**
+ * 同步缺失的区块
+ */
+async function syncMissingBlocks(): Promise<void> {
+  try {
+    const localMaxBlock = await blockRepository.getMaxBlockNumber();
+    let startBlock = localMaxBlock ? localMaxBlock + 1n : 0n;
+    const latestBlock = await rpcCallWithMetrics('getBlockNumber', () =>
+      client.getBlockNumber()
+    );
+
+    logger.info(
+      {
+        localMax: localMaxBlock?.toString() ?? 'none',
+        latest: latestBlock.toString(),
+        startBlock: startBlock.toString(),
+      },
+      'Starting initial sync'
+    );
+
+    if (startBlock <= latestBlock) {
+      const blocksToSync = latestBlock - startBlock + 1n;
+      logger.info(
+        { blocksToSync: blocksToSync.toString() },
+        'Blocks to sync'
+      );
+
+      const batchSize = BigInt(
+        parseInt(process.env.DB_SYNC_BATCH_SIZE || '10')
+      );
+      let currentBlock = startBlock;
+
+      while (currentBlock <= latestBlock && isRunning) {
+        // 使用三元表达式代替 Math.min
+        const batchEnd =
+          currentBlock + batchSize - 1n <= latestBlock
+            ? currentBlock + batchSize - 1n
+            : latestBlock;
+
+        if (logSamplers.perBatch.shouldLog()) {
+          logger.debug(
+            {
+              from: currentBlock.toString(),
+              to: batchEnd.toString(),
+            },
+            'Syncing batch'
+          );
+        }
+
+        await syncBlockBatch(currentBlock, batchEnd);
+        currentBlock = batchEnd + 1n;
+      }
+    } else {
+      logger.info('Local database is ahead of chain, no sync needed');
+    }
+  } catch (error) {
+    logger.error({ error }, '❌ Sync missing blocks failed');
+    throw error;
+  }
+}
+
+/**
+ * 轮询新区块
+ */
+async function pollNewBlocks(): Promise<void> {
+  logger.info(
+    {
+      interval: `${config.POLL_INTERVAL_MS}ms`,
+    },
+    'Starting real-time monitoring'
+  );
+
+  while (isRunning) {
+    try {
+      const currentBlock = await rpcCallWithMetrics(
+        'pollBlockNumber',
+        () => client.getBlockNumber()
+      );
+      const localMaxBlock =
+        (await blockRepository.getMaxBlockNumber()) ?? -1n;
+
+      if (logSamplers.perBatch.shouldLog()) {
+        logger.debug(
+          {
+            chainBlock: currentBlock.toString(),
+            localMax: localMaxBlock.toString(),
+          },
+          'Polling blocks'
+        );
+      }
+
+      if (currentBlock > localMaxBlock) {
+        const newBlocksCount = currentBlock - localMaxBlock;
+        logger.info(
+          {
+            count: newBlocksCount.toString(),
+            from: (localMaxBlock + 1n).toString(),
+            to: currentBlock.toString(),
+          },
+          'Found new blocks to sync'
+        );
+
+        await syncBlockBatch(localMaxBlock + 1n, currentBlock);
+      }
+
+      // 等待下一次轮询
+      await new Promise((resolve) =>
+        setTimeout(resolve, Number(config.POLL_INTERVAL_MS))
+      );
+    } catch (error) {
+      logger.error({ error }, 'Polling error');
+      // Don't throw - let polling continue
+      await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait before retry
+    }
+  }
+}
+
+/**
+ * 主函数
+ */
+async function main(): Promise<void> {
+  logger.info('🚀 Starting production-ready Web3 block indexer...');
+  logger.info({
+    rpcUrl: config.RPC_URL,
+    pollInterval: `${config.POLL_INTERVAL_MS}ms`,
+    batchSize: process.env.DB_SYNC_BATCH_SIZE || '10',
+  }, 'Configuration');
+
+  try {
+    // 设置全局错误处理器
+    setupGlobalErrorHandlers();
+
+    // 启动健康检查服务器
+    const healthServer = await startHealthServer();
+
+    // 初始化数据库
+    await initializeDatabase();
+
+    // 测试初始连接
+    logger.info('Testing initial RPC connection...');
+    const initialBlock = await rpcCallWithMetrics(
+      'initialBlockNumber',
+      () => client.getBlockNumber()
+    );
+    logger.info(
+      { blockNumber: initialBlock.toString() },
+      'Initial block number'
+    );
+
+    // 执行初始同步
+    logger.info('Performing initial database sync...');
+    await syncMissingBlocks();
+
+    // 设置优雅关闭
+    setupGracefulShutdown(async () => {
+      logger.info('Shutting down gracefully...');
+      isRunning = false;
+
+      // 关闭健康检查服务器
+      healthServer.close();
+
+      await closeDbConnection();
+    });
+
+    // 开始实时监控
+    logger.info('✅ Starting real-time monitoring...');
+    await pollNewBlocks();
+  } catch (error) {
+    logger.fatal({ error }, '❌ Failed to start indexer');
+    await closeDbConnection();
+    process.exit(1);
+  }
+}
+
+// 启动程序
+main().catch((error) => {
+  logger.fatal({ error }, 'Uncaught error in main');
+  process.exit(1);
+});

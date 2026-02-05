@@ -104,18 +104,22 @@ export class BlockRepository {
           if (result) {
             results.push(result);
 
-            // Track insert vs update
-            const existingHash = await trx
-              .selectFrom('blocks')
-              .where('chain_id', '=', block.chain_id || 1)
-              .where('number', '=', block.number)
-              .select('hash')
-              .executeTakeFirst();
+            // ✅ Fix for C4: Determine insert vs update without race condition query
+            // Strategy: Compare created_at timestamps to detect update vs insert
+            // - Fresh insert: created_at is very recent (< 1 second ago)
+            // - Update: created_at is older (from original insert)
+            //
+            // Note: This is a heuristic but works reliably in practice since batch
+            // operations complete within milliseconds, while updated rows have
+            // much older created_at timestamps
+            const now = Date.now();
+            const createdAt = new Date(result.created_at).getTime();
+            const isFreshInsert = (now - createdAt) < 1000; // < 1 second = likely insert
 
-            if (existingHash && existingHash.hash !== block.hash) {
-              updatedCount++;
-            } else {
+            if (isFreshInsert) {
               insertedCount++;
+            } else {
+              updatedCount++;
             }
           }
         } catch (error) {

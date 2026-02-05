@@ -1,78 +1,184 @@
-import { createPublicClient, http, BlockNumber } from 'viem';
+import { createPublicClient, http, Block, BlockNumber } from 'viem';
+import { createDbConnection, getDb, closeDbConnection } from './database/database-config';
+import { BlockRepository } from './database/block-repository';
+import { validateBlock, toDbBlock } from './database/schemas';
 
 const ANVIL_RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '2000'); // 2 seconds
+const DB_SYNC_BATCH_SIZE = parseInt(process.env.DB_SYNC_BATCH_SIZE || '10'); // 同步批次大小
 
 const client = createPublicClient({
   transport: http(ANVIL_RPC_URL),
 });
 
+let blockRepository: BlockRepository;
+
 let retryCount = 0;
 const MAX_RETRIES = 3;
+let isRunning = true;
 
-async function getBlockNumberWithRetry(): Promise<bigint> {
+async function initializeDatabase(): Promise<void> {
+  console.log(`[${new Date().toISOString()}] Initializing database connection...`);
   try {
-    console.log(`[${new Date().toISOString()}] Attempting to get block number (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+    // 创建数据库连接
+    await createDbConnection();
+    blockRepository = new BlockRepository();
 
-    const blockNumber = await client.getBlockNumber();
-
-    // Reset retry count on success
-    retryCount = 0;
-
-    console.log(`[${new Date().toISOString()}] Current block number: ${blockNumber}`);
-    return blockNumber;
-  } catch (error) {
-    retryCount++;
-
-    if (retryCount >= MAX_RETRIES) {
-      console.error(`[${new Date().toISOString()}] Failed to get block number after ${MAX_RETRIES} attempts. Error:`, error);
-      throw error;
+    // 尝试查询 blocks 表，如果不存在则创建
+    try {
+      await blockRepository.getBlockCount();
+      console.log(`[${new Date().toISOString()}] ✅ Database tables already exist`);
+    } catch (error) {
+      console.log(`[${new Date().toISOString()}] ⚠️  Blocks table not found, creating...`);
+      const { initDatabase } = await import('./database/init-database');
+      await initDatabase();
     }
 
-    console.warn(`[${new Date().toISOString()}] RPC connection error (attempt ${retryCount}/${MAX_RETRIES}):`, error);
-
-    // Wait before retry
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return getBlockNumberWithRetry();
+    console.log(`[${new Date().toISOString()}] ✅ Database connection established`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Database initialization failed:`, error);
+    throw error;
   }
 }
 
-async function pollBlockNumbers(): Promise<void> {
+async function syncMissingBlocks(): Promise<void> {
   try {
-    while (true) {
-      await getBlockNumberWithRetry();
+    // 获取本地数据库中的最大区块号
+    const localMaxBlock = await blockRepository.getMaxBlockNumber();
+    let startBlock = localMaxBlock ? BigInt(localMaxBlock) + BigInt(1) : BigInt(0);
+
+    // 获取链上当前最新区块号
+    const latestBlock = await client.getBlockNumber();
+
+    console.log(`[${new Date().toISOString()}] Local max block: ${localMaxBlock ?? 'none'}`);
+    console.log(`[${new Date().toISOString()}] Latest block on chain: ${latestBlock}`);
+    console.log(`[${new Date().toISOString()}] Syncing from block: ${startBlock}`);
+
+    // 如果本地最新区块落后于链上，同步缺失的区块
+    if (startBlock <= latestBlock) {
+      const blocksToSync = latestBlock - startBlock + BigInt(1);
+      console.log(`[${new Date().toISOString()}] Need to sync ${blocksToSync} blocks`);
+
+      // 分批同步以避免内存问题和 RPC 限制
+      let currentBlock = startBlock;
+      while (currentBlock <= latestBlock && isRunning) {
+        const batchEnd = BigInt(Math.min(Number(currentBlock) + DB_SYNC_BATCH_SIZE - 1, Number(latestBlock)));
+        console.log(`[${new Date().toISOString()}] Syncing batch: ${currentBlock} to ${batchEnd}`);
+
+        await syncBlockBatch(currentBlock, batchEnd);
+        currentBlock = batchEnd + BigInt(1);
+      }
+    } else {
+      console.log(`[${new Date().toISOString()}] Local database is ahead of chain, no sync needed`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Sync missing blocks failed:`, error);
+    throw error;
+  }
+}
+
+async function syncBlockBatch(startBlock: bigint, endBlock: bigint): Promise<void> {
+  const rawBlocks: unknown[] = [];
+
+  try {
+    // 批量获取区块数据
+    for (let blockNumber = startBlock; blockNumber <= endBlock; blockNumber++) {
+      try {
+        const block = await client.getBlock({ blockNumber });
+        rawBlocks.push(block);
+
+        // 实时输出进度
+        console.log(`[${new Date().toISOString()}] Fetched block ${blockNumber}: ${block.hash}`);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Failed to fetch block ${blockNumber}:`, error);
+        // 继续尝试下一个区块，不要因为单个区块失败而中断整个批次
+      }
+    }
+
+    // 使用 Zod 验证并保存区块数据
+    if (rawBlocks.length > 0) {
+      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+      if (savedCount > 0) {
+        console.log(`[${new Date().toISOString()}] ✅ Batch sync completed: ${savedCount} blocks saved`);
+      } else {
+        console.log(`[${new Date().toISOString()}] ⚠️  No valid blocks to save in this batch`);
+      }
+    } else {
+      console.log(`[${new Date().toISOString()}] ⚠️  No blocks fetched in this batch`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Block batch sync failed:`, error);
+    throw error;
+  }
+}
+
+async function pollNewBlocks(): Promise<void> {
+  while (isRunning) {
+    try {
+      const currentBlock = await client.getBlockNumber();
+      const localMaxBlock = await blockRepository.getMaxBlockNumber() ?? BigInt(-1);
+
+      console.log(`[${new Date().toISOString()}] Chain block: ${currentBlock.toString()}, Local max: ${localMaxBlock.toString()}`);
+
+      // 检查是否有新区块需要同步
+      if (currentBlock > localMaxBlock) {
+        const newBlocksCount = currentBlock - localMaxBlock;
+        console.log(`[${new Date().toISOString()}] Found ${newBlocksCount} new blocks to sync`);
+
+        // 同步新区块
+        await syncBlockBatch(localMaxBlock + BigInt(1), currentBlock);
+      } else {
+        console.log(`[${new Date().toISOString()}] No new blocks to sync`);
+      }
 
       // Wait for the next poll
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+    } catch (error) {
+      retryCount++;
+
+      if (retryCount >= MAX_RETRIES) {
+        console.error(`[${new Date().toISOString()}] Polling failed after ${MAX_RETRIES} attempts:`, error);
+
+        // 重置重试计数并等待更长时间再试
+        retryCount = 0;
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        continue;
+      }
+
+      console.warn(`[${new Date().toISOString()}] Polling error (attempt ${retryCount}/${MAX_RETRIES}):`, error);
+
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Polling stopped due to error:`, error);
-
-    // Wait longer before retrying after a failure
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // Try to restart polling
-    console.log(`[${new Date().toISOString()}] Attempting to restart polling...`);
-    pollBlockNumbers();
   }
 }
 
 async function main(): Promise<void> {
-  console.log(`[${new Date().toISOString()}] Starting Web3 block number indexer...`);
+  console.log(`[${new Date().toISOString()}] 🚀 Starting Web3 block number indexer with database sync...`);
   console.log(`[${new Date().toISOString()}] RPC URL: ${ANVIL_RPC_URL}`);
   console.log(`[${new Date().toISOString()}] Poll interval: ${POLL_INTERVAL}ms`);
   console.log(`[${new Date().toISOString()}] Max retries: ${MAX_RETRIES}`);
+  console.log(`[${new Date().toISOString()}] Database sync batch size: ${DB_SYNC_BATCH_SIZE}`);
 
   try {
-    // Test initial connection
+    // 初始化数据库
+    await initializeDatabase();
+
+    // 测试初始连接
     console.log(`[${new Date().toISOString()}] Testing initial RPC connection...`);
     const initialBlock = await client.getBlockNumber();
     console.log(`[${new Date().toISOString()}] Initial block number: ${initialBlock}`);
 
-    // Start polling
-    pollBlockNumbers();
+    // 执行初始同步
+    console.log(`[${new Date().toISOString()}] Performing initial database sync...`);
+    await syncMissingBlocks();
+
+    // 开始实时监控
+    console.log(`[${new Date().toISOString()}] Starting real-time monitoring...`);
+    pollNewBlocks();
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Failed to start indexer:`, error);
+    console.error(`[${new Date().toISOString()}] ❌ Failed to start indexer:`, error);
+    await closeDbConnection();
     process.exit(1);
   }
 }
@@ -80,12 +186,14 @@ async function main(): Promise<void> {
 // Handle graceful shutdown
 process.on('SIGINT', () => {
   console.log(`\n[${new Date().toISOString()}] Received SIGINT. Shutting down gracefully...`);
-  process.exit(0);
+  isRunning = false;
+  closeDbConnection().then(() => process.exit(0));
 });
 
 process.on('SIGTERM', () => {
   console.log(`\n[${new Date().toISOString()}] Received SIGTERM. Shutting down gracefully...`);
-  process.exit(0);
+  isRunning = false;
+  closeDbConnection().then(() => process.exit(0));
 });
 
 main().catch(error => {

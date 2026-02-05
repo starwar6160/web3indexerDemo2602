@@ -8,6 +8,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ErrorHandler = exports.ErrorClassifier = exports.ErrorRecoveryAction = exports.ErrorCategory = void 0;
+const logger_1 = __importDefault(require("./logger"));
 var ErrorCategory;
 (function (ErrorCategory) {
     ErrorCategory["NETWORK"] = "network";
@@ -213,4 +214,3 @@ class ErrorHandler {
     }
 }
 exports.ErrorHandler = ErrorHandler;
-const logger_1 = __importDefault(require("./logger"));

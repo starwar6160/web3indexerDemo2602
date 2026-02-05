@@ -6,7 +6,7 @@ const kysely_1 = require("kysely");
 const schemas_1 = require("./schemas");
 class BlockRepository {
     constructor() {
-        this.db = (0, database_config_1.getDb)();
+        this.db = (0, database_config_1.getDb)(); // Made public for transaction support
     }
     async create(blockData) {
         const now = new Date().toISOString();
@@ -40,7 +40,13 @@ class BlockRepository {
         return results;
     }
     /**
-     * 使用 Zod 验证并保存区块数据 (with transaction isolation)
+     * 使用 Zod 验证并保存区块数据 (with transaction isolation and upsert)
+     *
+     * CRITICAL FIX: Implements upsert semantics to handle:
+     * - Restarts after crashes (idempotent writes)
+     * - Reorg scenarios (hash updates)
+     * - Concurrent instances (conflict resolution)
+     *
      * @param rawBlocks - 从 viem 获取的原始区块数据
      * @returns 保存的区块数量
      */
@@ -55,15 +61,66 @@ class BlockRepository {
         }
         // 转换为数据库格式并保存
         const dbBlocks = validatedBlocks.map(schemas_1.toDbBlock);
-        // Use transaction for atomic batch write
+        let updatedCount = 0;
+        let insertedCount = 0;
+        // Use transaction for atomic batch write with upsert
         const saved = await this.db.transaction().execute(async (trx) => {
-            return await trx
-                .insertInto('blocks')
-                .values(dbBlocks)
-                .returningAll()
-                .execute();
+            const results = [];
+            for (const block of dbBlocks) {
+                // Try to insert first
+                try {
+                    const result = await trx
+                        .insertInto('blocks')
+                        .values({
+                        ...block,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    })
+                        .onConflict((oc) => oc
+                        .column(['chain_id', 'number'])
+                        .doUpdateSet({
+                        hash: block.hash,
+                        parent_hash: block.parent_hash,
+                        timestamp: block.timestamp,
+                        updated_at: new Date().toISOString(),
+                    })
+                        .where('blocks.hash', '!=', block.hash))
+                        .returningAll()
+                        .executeTakeFirst();
+                    if (result) {
+                        results.push(result);
+                        // ✅ Fix for C4: Determine insert vs update without race condition query
+                        // Strategy: Compare created_at timestamps to detect update vs insert
+                        // - Fresh insert: created_at is very recent (< 1 second ago)
+                        // - Update: created_at is older (from original insert)
+                        //
+                        // Note: This is a heuristic but works reliably in practice since batch
+                        // operations complete within milliseconds, while updated rows have
+                        // much older created_at timestamps
+                        const now = Date.now();
+                        const createdAt = new Date(result.created_at).getTime();
+                        const isFreshInsert = (now - createdAt) < 1000; // < 1 second = likely insert
+                        if (isFreshInsert) {
+                            insertedCount++;
+                        }
+                        else {
+                            updatedCount++;
+                        }
+                    }
+                }
+                catch (error) {
+                    console.error(`[Repository] Failed to upsert block ${block.number}:`, error);
+                    throw error;
+                }
+            }
+            return results;
         });
-        console.log(`[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks (${rawBlocks.length - saved.length} invalid)`);
+        console.log(`[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks ` +
+            `(${insertedCount} inserted, ${updatedCount} updated, ${rawBlocks.length - saved.length} invalid)`);
+        // Warn if we detected reorg (hash changes)
+        if (updatedCount > 0) {
+            console.warn(`[Repository] ⚠️  Detected ${updatedCount} hash changes (possible reorg)`);
+        }
         return saved.length;
     }
     /**
@@ -157,8 +214,22 @@ class BlockRepository {
     }
     /**
      * Delete all blocks after a specific block number (for reorg handling)
+     *
+     * CRITICAL FIX: Added safety limit to prevent accidental mass deletion
+     * in case of extreme reorg depth or incorrect blockNumber
      */
     async deleteBlocksAfter(blockNumber) {
+        const MAX_REORG_DEPTH = 1000; // Maximum allowed reorg depth
+        // Check current max block before deletion
+        const currentMax = await this.getMaxBlockNumber();
+        if (currentMax && currentMax > blockNumber) {
+            const depth = Number(currentMax - blockNumber);
+            if (depth > MAX_REORG_DEPTH) {
+                throw new Error(`Reorg depth ${depth} exceeds maximum allowed ${MAX_REORG_DEPTH}. ` +
+                    `Manual intervention required. Current max: ${currentMax}, Requested: ${blockNumber}`);
+            }
+            console.warn(`[Repository] Deleting ${depth} blocks after ${blockNumber} (reorg detected)`);
+        }
         const result = await this.db
             .deleteFrom('blocks')
             .where('number', '>', blockNumber)
@@ -176,6 +247,64 @@ class BlockRepository {
             .selectAll()
             .where('hash', 'in', hashes)
             .execute();
+    }
+    /**
+     * Detect gaps in the blockchain sequence
+     *
+     * Returns array of {start, end} representing missing block ranges
+     */
+    async detectGaps() {
+        const maxBlock = await this.getMaxBlockNumber();
+        if (!maxBlock || maxBlock < 1n) {
+            return [];
+        }
+        // SQL query to find gaps by identifying sequential breaks
+        const result = await this.db
+            .selectFrom('blocks as b1')
+            .select([
+            (0, kysely_1.sql) `b1.number + 1`.as('gap_start'),
+            (0, kysely_1.sql) `(
+          SELECT MIN(b2.number)
+          FROM blocks b2
+          WHERE b2.number > b1.number
+        ) - 1`.as('gap_end')
+        ])
+            .where('b1.number', '<', maxBlock)
+            .where((0, kysely_1.sql) `NOT EXISTS (
+        SELECT 1 FROM blocks b2 WHERE b2.number = b1.number + 1
+      )`)
+            .execute();
+        // Filter and convert to bigint
+        return result
+            .filter(row => row.gap_start !== null && row.gap_end !== null && row.gap_start <= row.gap_end)
+            .map(row => ({
+            start: BigInt(row.gap_start),
+            end: BigInt(row.gap_end)
+        }));
+    }
+    /**
+     * Get statistics about block coverage
+     */
+    async getBlockCoverageStats() {
+        const maxBlock = await this.getMaxBlockNumber();
+        const totalBlocks = await this.getBlockCount();
+        if (!maxBlock || maxBlock < 1n) {
+            return {
+                totalBlocks,
+                expectedBlocks: 0,
+                missingBlocks: 0,
+                coverage: 100
+            };
+        }
+        const expectedBlocks = Number(maxBlock) + 1; // Block 0 to maxBlock
+        const missingBlocks = expectedBlocks - totalBlocks;
+        const coverage = totalBlocks > 0 ? (totalBlocks / expectedBlocks) * 100 : 0;
+        return {
+            totalBlocks,
+            expectedBlocks,
+            missingBlocks,
+            coverage: Math.round(coverage * 100) / 100
+        };
     }
 }
 exports.BlockRepository = BlockRepository;

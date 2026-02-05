@@ -14,6 +14,11 @@ function createDbConnection() {
     const dialect = new kysely_1.PostgresDialect({
         pool: new pg_1.Pool({
             connectionString: databaseUrl,
+            max: 20, // Maximum pool size
+            idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+            connectionTimeoutMillis: 5000, // Return error after 5 seconds if connection cannot be established
+            statement_timeout: 30000, // Query timeout
+            query_timeout: 30000,
         }),
     });
     dbInstance = new kysely_1.Kysely({

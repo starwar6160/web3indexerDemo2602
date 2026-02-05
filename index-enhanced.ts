@@ -1,26 +1,39 @@
 import { createDbConnection, closeDbConnection } from './database/database-config';
 import { CheckpointRepository } from './database/checkpoint-repository';
 import { SyncEngine } from './sync-engine';
+import { DistributedLock, AppLock } from './database/distributed-lock';
+import { initLockTable } from './database/init-lock-table';
+import { randomUUID } from 'crypto';
 
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5000'); // 5 seconds
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '100'); // 100 blocks per batch
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || '3');
-const CONFIRMATION_DEPTH = parseInt(process.env.CONFIRMATION_DEPTH || '0'); // Number of blocks to wait before confirming
+const CONFIRMATION_DEPTH = parseInt(process.env.CONFIRMATION_DEPTH || '12'); // P5 Fix: Default 12 blocks (~2 min on Ethereum)
+const CONCURRENCY = parseInt(process.env.CONCURRENCY || '10'); // P1 Fix: Parallel fetch concurrency
+const INSTANCE_ID = process.env.INSTANCE_ID || randomUUID(); // Unique instance identifier
 
 let isRunning = true;
 
 async function main(): Promise<void> {
   console.log(`[${new Date().toISOString()}] 🚀 Starting Enhanced Web3 Block Indexer`);
+  console.log(`[${new Date().toISOString()}] Instance ID: ${INSTANCE_ID}`);
   console.log(`[${new Date().toISOString()}] RPC URL: ${RPC_URL}`);
   console.log(`[${new Date().toISOString()}] Poll interval: ${POLL_INTERVAL}ms`);
   console.log(`[${new Date().toISOString()}] Batch size: ${BATCH_SIZE}`);
   console.log(`[${new Date().toISOString()}] Max retries: ${MAX_RETRIES}`);
-  console.log(`[${new Date().toISOString()}] Confirmation depth: ${CONFIRMATION_DEPTH}`);
+  console.log(`[${new Date().toISOString()}] Confirmation depth: ${CONFIRMATION_DEPTH} (P5 Fix: prevents reorg storms)`);
+  console.log(`[${new Date().toISOString()}] Concurrency: ${CONCURRENCY} (P1 Fix: parallel fetch)`);
 
   // Initialize database
   console.log(`[${new Date().toISOString()}] Initializing database...`);
   await createDbConnection();
+
+  // Initialize lock table (P2 Fix)
+  await initLockTable();
+  const appLock = new AppLock();
+  await appLock.cleanupExpiredLocks();
+  console.log(`[${new Date().toISOString()}] ✅ Distributed lock system initialized`);
 
   // Initialize checkpoint repository
   const checkpointRepo = new CheckpointRepository();
@@ -34,6 +47,8 @@ async function main(): Promise<void> {
     maxRetries: MAX_RETRIES,
     retryDelayMs: 1000,
     confirmationDepth: CONFIRMATION_DEPTH,
+    concurrency: CONCURRENCY, // P1 Fix
+    rpcTimeout: 30000, // P4 Fix: 30s timeout
   });
 
   // Check for existing checkpoint
@@ -42,41 +57,58 @@ async function main(): Promise<void> {
     console.log(`[${new Date().toISOString()}] 📍 Found checkpoint at block ${checkpoint.block_number}`);
   }
 
-  // Initial sync and gap repair
+  // Initial sync and gap repair with distributed lock (P2 Fix)
   console.log(`[${new Date().toISOString()}] 🔄 Running initial sync and gap repair...`);
 
   try {
-    // First, repair any gaps
-    await syncEngine.repairGaps();
+    // P2 Fix: Acquire distributed lock before syncing
+    const lock = new DistributedLock('block-sync');
+    const acquired = await lock.acquire();
 
-    // Then sync to tip
-    await syncEngine.syncToTip();
-
-    // Show statistics
-    await syncEngine.getStats();
-
-    // Save checkpoint
-    const chainTip = await syncEngine['client'].getBlockNumber();
-    const tipBlock = await syncEngine['blockRepository'].getMaxBlockNumber();
-    const latestBlock = tipBlock ? await syncEngine['blockRepository'].findById(tipBlock) : null;
-
-    if (latestBlock) {
-      await checkpointRepo.saveCheckpoint({
-        name: 'latest',
-        block_number: latestBlock.number,
-        block_hash: latestBlock.hash,
-        metadata: {
-          chain_tip: chainTip.toString(),
-          confirmation_depth: CONFIRMATION_DEPTH,
-        },
-      });
-      console.log(`[${new Date().toISOString()}] ✅ Checkpoint saved at block ${latestBlock.number}`);
+    if (!acquired) {
+      console.warn(`[${new Date().toISOString()}] ⚠️  Another instance is already syncing. Exiting.`);
+      console.warn(`[${new Date().toISOString()}] 💡 To force sync, release the lock or wait for it to expire.`);
+      await closeDbConnection();
+      process.exit(0);
     }
 
-    // Clean up old checkpoints
-    const cleaned = await checkpointRepo.cleanupOldCheckpoints(10);
-    if (cleaned > 0) {
-      console.log(`[${new Date().toISOString()}] 🧹 Cleaned up ${cleaned} old checkpoints`);
+    try {
+      // First, repair any gaps
+      await syncEngine.repairGaps();
+
+      // Then sync to tip
+      await syncEngine.syncToTip();
+
+      // Show statistics
+      await syncEngine.getStats();
+
+      // Save checkpoint
+      const chainTip = await syncEngine['client'].getBlockNumber();
+      const tipBlock = await syncEngine['blockRepository'].getMaxBlockNumber();
+      const latestBlock = tipBlock ? await syncEngine['blockRepository'].findById(tipBlock) : null;
+
+      if (latestBlock) {
+        await checkpointRepo.saveCheckpoint({
+          name: 'latest',
+          block_number: latestBlock.number,
+          block_hash: latestBlock.hash,
+          metadata: {
+            chain_tip: chainTip.toString(),
+            confirmation_depth: CONFIRMATION_DEPTH,
+            instance_id: INSTANCE_ID,
+          },
+        });
+        console.log(`[${new Date().toISOString()}] ✅ Checkpoint saved at block ${latestBlock.number}`);
+      }
+
+      // Clean up old checkpoints
+      const cleaned = await checkpointRepo.cleanupOldCheckpoints(10);
+      if (cleaned > 0) {
+        console.log(`[${new Date().toISOString()}] 🧹 Cleaned up ${cleaned} old checkpoints`);
+      }
+    } finally {
+      // P2 Fix: Always release lock
+      await lock.release();
     }
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Initial sync failed:`, error);
@@ -104,6 +136,7 @@ async function main(): Promise<void> {
             block_hash: block.hash,
             metadata: {
               chain_tip: (await syncEngine['client'].getBlockNumber()).toString(),
+              instance_id: INSTANCE_ID,
             },
           });
         }

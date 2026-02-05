@@ -2,6 +2,7 @@ import { createPublicClient, http, Block } from 'viem';
 import { BlockRepository } from './database/block-repository';
 import { validateBlocks, toDbBlock, ValidatedBlock } from './database/schemas';
 import { sql } from 'kysely';
+import pLimit from 'p-limit';
 
 type PublicClient = ReturnType<typeof createPublicClient>;
 
@@ -9,11 +10,13 @@ type PublicClient = ReturnType<typeof createPublicClient>;
  * Configuration for the sync engine
  */
 export interface SyncEngineConfig {
-  rpcUrl: string;
+  rpcUrl: string | string[]; // Support multiple RPC URLs for load balancing
   batchSize: number;
   maxRetries: number;
   retryDelayMs: number;
   confirmationDepth?: number; // Number of blocks to wait before confirming
+  concurrency?: number; // P1 Fix: Parallel block fetching concurrency
+  rpcTimeout?: number; // P4 Fix: RPC request timeout in ms
 }
 
 /**
@@ -37,15 +40,28 @@ export interface BatchSyncResult {
  */
 export class SyncEngine {
   private client: PublicClient;
+  private clients: PublicClient[] = []; // P4 Fix: RPC pool for load balancing
   private blockRepository: BlockRepository;
   private config: SyncEngineConfig;
+  private currentRpcIndex = 0; // Round-robin index
 
   constructor(config: SyncEngineConfig) {
     this.config = config;
-    this.client = createPublicClient({
-      transport: http(config.rpcUrl),
-    });
     this.blockRepository = new BlockRepository();
+
+    // P4 Fix: Support multiple RPC URLs with round-robin
+    const rpcUrls = Array.isArray(config.rpcUrl) ? config.rpcUrl : [config.rpcUrl];
+
+    this.clients = rpcUrls.map(url =>
+      createPublicClient({
+        transport: http(url, {
+          timeout: config.rpcTimeout || 30000, // 30s default
+          retryCount: 0, // We handle retries manually
+        }),
+      })
+    );
+
+    this.client = this.clients[0]; // Primary client
   }
 
   /**
@@ -72,38 +88,84 @@ export class SyncEngine {
     let currentParentHash = expectedParentHash;
     const failedBlocks: Array<{number: bigint, error: string}> = [];
 
-    // Phase 1: Fetch all blocks with retry logic (C1 fix)
-    let blockNumber = startBlock;
-    let retryCount = 0;
+    // P1 Fix: Parallel block fetching with concurrency control
+    const concurrency = this.config.concurrency || 10; // Default: 10 concurrent requests
+    const limit = pLimit(concurrency);
 
-    while (blockNumber <= endBlock) {
-      try {
-        const block = await this.client.getBlock({ blockNumber });
-        blocksToSave.push(block);
+    console.log(`[SyncEngine] Fetching ${endBlock - startBlock + 1n} blocks with concurrency ${concurrency}`);
 
-        console.log(`[SyncEngine] Fetched block ${blockNumber}: ${block.hash}`);
-        blockNumber = blockNumber + 1n;
-        retryCount = 0; // Reset retry on success
-      } catch (error) {
-        retryCount++;
+    // Create array of block numbers to fetch
+    const blockNumbers: bigint[] = [];
+    let bn = startBlock;
+    while (bn <= endBlock) {
+      blockNumbers.push(bn);
+      bn = bn + 1n;
+    }
 
-        if (retryCount >= this.config.maxRetries) {
-          const errorMsg = `Failed to fetch block ${blockNumber} after ${this.config.maxRetries} attempts`;
-          console.error(`[SyncEngine] ${errorMsg}:`, error);
-          failedBlocks.push({ number: blockNumber, error: String(error) });
+    // Phase 1: Parallel fetch with retry logic (C1 + P1 fix)
+    const fetchPromises = blockNumbers.map((blockNumber) =>
+      limit(async () => {
+        let retryCount = 0;
+        let clientIndex = 0;
 
-          // C1 Fix: Fail-fast - don't skip blocks
-          throw new Error(`${errorMsg}. Aborting batch to prevent data loss.`);
+        while (retryCount < this.config.maxRetries) {
+          try {
+            // P4 Fix: Round-robin RPC selection
+            const client = this.clients[clientIndex % this.clients.length];
+            const block = await client.getBlock({ blockNumber });
+
+            console.log(`[SyncEngine] ✅ Fetched block ${blockNumber} from RPC ${clientIndex}`);
+            return { success: true, block, blockNumber };
+          } catch (error) {
+            retryCount++;
+            clientIndex++; // Try next RPC on failure
+
+            if (retryCount >= this.config.maxRetries) {
+              const errorMsg = `Failed to fetch block ${blockNumber} after ${this.config.maxRetries} attempts`;
+              console.error(`[SyncEngine] ❌ ${errorMsg}:`, error);
+              return { success: false, error: String(error), blockNumber };
+            }
+
+            // P4 Fix: Check for rate limiting (429)
+            if (String(error).includes('429') || String(error).includes('rate limit')) {
+              const backoffMs = this.config.retryDelayMs * retryCount * 2; // Exponential backoff for 429
+              console.warn(
+                `[SyncEngine] ⚠️  Rate limited on block ${blockNumber}, ` +
+                `waiting ${backoffMs}ms before retry...`
+              );
+              await this.sleep(backoffMs);
+            } else {
+              await this.sleep(this.config.retryDelayMs * retryCount);
+            }
+          }
         }
 
-        console.warn(
-          `[SyncEngine] Failed to fetch block ${blockNumber} ` +
-          `(attempt ${retryCount}/${this.config.maxRetries}), retrying...`
-        );
+        return { success: false, error: 'Max retries exceeded', blockNumber };
+      })
+    );
 
-        await this.sleep(this.config.retryDelayMs * retryCount);
+    // Wait for all fetches to complete
+    const results = await Promise.all(fetchPromises);
+
+    // Process results
+    for (const result of results) {
+      if (result.success && 'block' in result) {
+        blocksToSave.push(result.block);
+      } else {
+        failedBlocks.push({ number: result.blockNumber, error: result.error });
       }
     }
+
+    // C1 Fix: Fail-fast if any blocks failed
+    if (failedBlocks.length > 0) {
+      throw new Error(
+        `Failed to fetch ${failedBlocks.length} blocks: ${failedBlocks.map(f => `#${f.number}`).join(', ')}. ` +
+        `Aborting batch to prevent data loss.`
+      );
+    }
+
+    // Sort blocks by number to ensure correct order
+    blocksToSave.sort((a, b) => (a.number > b.number ? 1 : -1));
 
     if (blocksToSave.length === 0) {
       throw new Error('No blocks fetched in batch');

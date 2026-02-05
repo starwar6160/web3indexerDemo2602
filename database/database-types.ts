@@ -3,6 +3,7 @@ import { ColumnType, Generated, Insertable, Selectable, Updateable } from 'kysel
 export interface Database {
   blocks: BlockTable;
   sync_checkpoints: CheckpointTable;
+  app_locks: AppLockTable;
 }
 
 export interface BlockTable {
@@ -33,3 +34,15 @@ export type BlockUpdate = Updateable<BlockTable>;
 export type Checkpoint = Selectable<CheckpointTable>;
 export type NewCheckpoint = Insertable<CheckpointTable>;
 export type CheckpointUpdate = Updateable<CheckpointTable>;
+
+export interface AppLockTable {
+  name: Generated<string>;
+  instance_id: string;
+  expires_at: ColumnType<Date, string, Date>;
+  created_at: ColumnType<Date, string, Date>;
+  updated_at: ColumnType<Date, string, Date>;
+}
+
+export type AppLock = Selectable<AppLockTable>;
+export type NewAppLock = Insertable<AppLockTable>;
+export type AppLockUpdate = Updateable<AppLockTable>;

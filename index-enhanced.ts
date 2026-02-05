@@ -166,22 +166,89 @@ async function main(): Promise<void> {
   }
 }
 
-// Handle graceful shutdown
+// ============================================================================
+// SpaceX哲学: 边界层异常处理（唯一允许catch的地方）
+// ============================================================================
+
+/**
+ * 致命错误处理器
+ *
+ * 规则：
+ * - 记录完整日志（带telemetry）
+ * - 优雅退出（让容器重启）
+ * - 不要尝试恢复
+ *
+ * 原因：
+ * - 未捕获异常 = 未知状态
+ * - 未知状态 = 必须重启
+ * - Docker/systemd会自动重启我们
+ */
+function fatal(error: Error, context: string) {
+  const timestamp = new Date().toISOString();
+  const errorMsg = {
+    timestamp,
+    context,
+    error: {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    },
+    instanceId: INSTANCE_ID,
+  };
+
+  // 结构化日志输出（JSON格式，方便日志聚合）
+  console.error(JSON.stringify({ level: 'FATAL', ...errorMsg }));
+
+  // 立即退出（非0状态码触发容器重启）
+  process.exit(1);
+}
+
+// 未处理的Promise rejection
+process.on('unhandledRejection', (reason, promise) => {
+  fatal(
+    reason instanceof Error ? reason : new Error(String(reason)),
+    'unhandledRejection'
+  );
+});
+
+// 未捕获的异常
+process.on('uncaughtException', (error) => {
+  fatal(error, 'uncaughtException');
+});
+
+// 优雅关闭信号
 process.on('SIGINT', async () => {
-  console.log(`\n[${new Date().toISOString()}] Received SIGINT. Shutting down gracefully...`);
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({
+    level: 'INFO',
+    timestamp,
+    message: 'Received SIGINT. Shutting down gracefully.',
+    instanceId: INSTANCE_ID,
+  }));
+
   isRunning = false;
   await closeDbConnection();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log(`\n[${new Date().toISOString()}] Received SIGTERM. Shutting down gracefully...`);
+  const timestamp = new Date().toISOString();
+  console.log(JSON.stringify({
+    level: 'INFO',
+    timestamp,
+    message: 'Received SIGTERM. Shutting down gracefully.',
+    instanceId: INSTANCE_ID,
+  }));
+
   isRunning = false;
   await closeDbConnection();
   process.exit(0);
 });
 
+// ============================================================================
+// 边界层：main函数（唯一的try-catch位置）
+// ============================================================================
+
 main().catch(error => {
-  console.error(`[${new Date().toISOString()}] ❌ Fatal error:`, error);
-  closeDbConnection().then(() => process.exit(1));
+  fatal(error, 'main_function');
 });

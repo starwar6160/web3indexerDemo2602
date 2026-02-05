@@ -31,9 +31,17 @@ services:
     depends_on:
       - anvil
       - postgres
+    ports:
+      - "3000:3000"  # 健康检查端口
     environment:
       - RPC_URL=http://anvil:8545
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
+      - POLL_INTERVAL_MS=2000
+      - DB_SYNC_BATCH_SIZE=10
+      - MAX_RETRIES=3
+      - LOG_LEVEL=info
+      - NODE_ENV=production
+      - HEALTH_CHECK_PORT=3000
     restart: unless-stopped
 
   # 管理容器 - 用于执行脚本和管理任务

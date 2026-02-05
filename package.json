@@ -10,6 +10,13 @@
     "db:init": "ts-node scripts/migrate-database.ts",
     "db:migrate": "ts-node scripts/migrate-database.ts",
     "db:status": "ts-node scripts/check-database.ts",
+    "test:quick": "bash scripts/quick-test.sh",
+    "test:sync": "bash scripts/test-block-sync.sh",
+    "test:monitor": "bash scripts/monitor-sync.sh",
+    "test:interactive": "bash scripts/interactive-test.sh",
+    "container:quick": "bash scripts/container-quick-test.sh",
+    "container:monitor": "bash scripts/container-monitor.sh",
+    "container:interactive": "bash scripts/container-interactive.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

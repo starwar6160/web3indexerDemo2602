@@ -36,5 +36,25 @@ services:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/postgres
     restart: unless-stopped
 
+  # 管理容器 - 用于执行脚本和管理任务
+  workspace:
+    build:
+      context: .
+      dockerfile: Dockerfile.workspace
+    container_name: web3-indexer-workspace
+    depends_on:
+      - postgres
+      - anvil
+    environment:
+      - RPC_URL=http://anvil:8545
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
+    volumes:
+      - .:/app
+      - /app/node_modules
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
 volumes:
   postgres_data:

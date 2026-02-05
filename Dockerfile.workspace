@@ -1,0 +1,29 @@
+FROM node:20-slim
+
+# 安装必要的工具
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    bash \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 复制 package 文件
+COPY package*.json ./
+
+# 安装依赖
+RUN npm install
+
+# 复制源代码
+COPY . .
+
+# 安装 TypeScript
+RUN npm install -g typescript ts-node
+
+# 设置默认工作目录
+WORKDIR /app
+
+# 保持容器运行
+CMD ["/bin/bash"]

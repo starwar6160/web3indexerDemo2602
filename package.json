@@ -18,13 +18,19 @@
     "test:monitor": "bash scripts/monitor-sync.sh",
     "test:interactive": "bash scripts/interactive-test.sh",
     "test:basic": "node tests/container-test.js",
-    "test:reorg": "node dist/tests/reorg.test.js || echo '⚠️  compile first'",
+    "test:reorg:legacy": "node dist/tests/reorg.test.js || echo '⚠️  compile first'",
     "test:stress": "node dist/tests/stress.test.js || echo '⚠️  compile first'",
-    "test:all": "npm run build && npm run test:reorg && npm run test:stress",
+    "test:all:legacy": "npm run build && npm run test:reorg:legacy && npm run test:stress",
     "rebuild": "bash scripts/quick-rebuild.sh",
     "init:container": "bash scripts/init-container-env.sh",
     "fix:build": "bash scripts/fix-container-build.sh",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:api": "vitest run tests/api",
+    "test:reorg": "vitest run tests/integration/reorg.test.ts",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@types/pg": "^8.16.0",

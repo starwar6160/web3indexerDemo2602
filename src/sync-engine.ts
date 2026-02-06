@@ -167,6 +167,8 @@ export class SyncEngine {
     const blocksToSave: Block[] = [];
     let currentParentHash = expectedParentHash;
     const failedBlocks: Array<{number: bigint, error: string}> = [];
+    let reorgDetectedAt: bigint | null = null;
+    let reorgParentHash: string | null = null;
 
     // P1 Fix: Parallel block fetching with concurrency control
     const concurrency = this.config.concurrency || 10; // Default: 10 concurrent requests
@@ -286,10 +288,9 @@ export class SyncEngine {
             `  New hash: ${block.hash}`
           );
 
-          // Handle reorg
-          if (block.parentHash) {
-            await this.handleReorg(block.number, block.parentHash);
-          }
+          // Mark for reorg handling - will be processed inside transaction
+          reorgDetectedAt = block.number;
+          reorgParentHash = block.parentHash || null;
         } else {
           throw new Error(
             `Chain discontinuity detected at block ${block.number}. ` +
@@ -310,6 +311,9 @@ export class SyncEngine {
       );
     }
 
+    // CRITICAL FIX: Convert validated blocks to DB format
+    const dbBlocks = validatedBlocks.map(toDbBlock);
+
     // Phase 3.5: Fetch Transfer events (INSIDE transaction for true atomicity)
     // Phase 4: Atomic database write in transaction (C3 fix) - BLOCKS + TRANSFERS
     let insertedCount = 0;
@@ -317,6 +321,36 @@ export class SyncEngine {
     let transfersSaved = 0;
 
     await this.blockRepository.db.transaction().execute(async (trx) => {
+      // 0. Handle reorg first if detected - must be inside same transaction
+      if (reorgDetectedAt !== null) {
+        console.warn(`[SyncEngine] Handling reorg at block ${reorgDetectedAt} inside transaction`);
+        
+        // Delete blocks due to reorg
+        const deleteResult = await trx
+          .deleteFrom('blocks')
+          .where('number', '>=', reorgDetectedAt)
+          .execute();
+        console.warn(`[SyncEngine] Deleted ${deleteResult.length} blocks due to reorg`);
+
+        // Verify cascade delete worked
+        if (this.config.tokenContract) {
+          const remainingTransfers = await trx
+            .selectFrom('transfers')
+            .select('block_number')
+            .where('block_number', '>=', reorgDetectedAt)
+            .limit(1)
+            .executeTakeFirst();
+
+          if (remainingTransfers) {
+            throw new Error(
+              `Cascade delete failed: transfers still exist at block ${reorgDetectedAt}. ` +
+              `Database inconsistency detected.`
+            );
+          }
+        }
+        console.warn(`[SyncEngine] ✅ Reorg handled atomically inside transaction`);
+      }
+
       // 4a. Fetch events INSIDE transaction - fail fast if RPC unavailable
       let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
       if (this.config.tokenContract) {

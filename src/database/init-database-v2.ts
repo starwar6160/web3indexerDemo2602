@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 export async function initDatabaseV2(): Promise<void> {
   console.log('[INIT V2] Initializing Phase 3 database schema...');
 
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   try {
     // 1. 创建 transactions 表

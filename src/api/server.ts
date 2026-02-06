@@ -148,10 +148,16 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/api/status', async (req: Request, res: Response) => {
     try {
-      const [localMaxBlock, chainHead, dbHealth] = await Promise.all([
+      const [localMaxBlock, chainHead, dbHealth, latestBlock] = await Promise.all([
         blockRepo.getMaxBlockNumber(),
         rpcClient.getBlockNumber().catch(() => null),
         checkDbHealth(),
+        blockRepo.db
+          .selectFrom('blocks')
+          .select('created_at')
+          .orderBy('number', 'desc')
+          .limit(1)
+          .executeTakeFirst(),
       ]);
 
       const lag = chainHead && localMaxBlock !== null
@@ -169,6 +175,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         sync: {
           latestNetworkBlock: chainHead?.toString() ?? null,
           latestIndexedBlock: localMaxBlock?.toString() ?? null,
+          lastSyncedAt: latestBlock?.created_at ?? null,
           lag: lag?.toString() ?? null,
           syncPercentage,
           synced: lag !== null && lag <= 5,

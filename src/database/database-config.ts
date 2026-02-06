@@ -5,20 +5,16 @@ import { Database } from './database-types';
 let dbInstance: Kysely<Database> | null = null;
 let isInitializing = false; // 🟣 Fix R1: Track initialization state
 
-export function createDbConnection(): Kysely<Database> {
+export async function createDbConnection(): Promise<Kysely<Database>> {
   if (dbInstance) {
     return dbInstance;
   }
 
   // 🟣 Fix R1: Prevent concurrent initialization attempts
-  // Problem: If createDbConnection() fails, dbInstance remains null but subsequent calls
-  // may attempt to create new connections, leading to multiple pool instances
-  // Solution: Track initialization state and throw error if already initializing
   if (isInitializing) {
     throw new Error(
       'Database connection is already being initialized. ' +
-      'This may indicate a race condition in your startup code. ' +
-      'Please ensure createDbConnection() is called only once.'
+      'This may indicate a race condition in your startup code. '
     );
   }
 
@@ -30,10 +26,10 @@ export function createDbConnection(): Kysely<Database> {
     const dialect = new PostgresDialect({
       pool: new Pool({
         connectionString: databaseUrl,
-        max: 20,                      // Maximum pool size
-        idleTimeoutMillis: 30000,     // Close idle clients after 30 seconds
-        connectionTimeoutMillis: 5000,// Return error after 5 seconds if connection cannot be established
-        statement_timeout: 30000,     // Query timeout
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
+        statement_timeout: 30000,
         query_timeout: 30000,
       }),
     });
@@ -42,22 +38,23 @@ export function createDbConnection(): Kysely<Database> {
       dialect,
     });
 
-    // Note: Connection is verified on first actual query
-    // The pg pool handles connection errors gracefully
+    // CRITICAL FIX: Test connection immediately
+    try {
+      await dbInstance.selectFrom('blocks').select('number').limit(1).executeTakeFirst();
+      console.log('✅ Database connection verified');
+    } catch (error) {
+      dbInstance = null;
+      throw new Error(`Database connection test failed: ${error}`);
+    }
 
     return dbInstance;
   } catch (error) {
-    // 🟣 Fix R1: Clear state on failure to allow retry
-    // If connection fails, don't leave dbInstance in a bad state
     dbInstance = null;
     isInitializing = false;
     throw new Error(
-      `Failed to create database connection: ${error}. ` +
-      `Connection string may be invalid or database server may be unreachable.`
+      `Failed to create database connection: ${error}. `
     );
   } finally {
-    // Only clear initialization flag if we succeeded
-    // If we failed, the catch block already cleared it
     if (dbInstance) {
       isInitializing = false;
     }

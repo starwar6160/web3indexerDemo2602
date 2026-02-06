@@ -536,12 +536,15 @@ async function main(): Promise<void> {
   try {
     // 设置全局错误处理器
     setupGlobalErrorHandlers();
+    logger.info('✅ Step 1: Global error handlers configured');
 
     // 启动健康检查服务器
     const healthServer = await startHealthServer();
+    logger.info('✅ Step 2: Health server started');
 
     // 初始化数据库
     await initializeDatabase();
+    logger.info('✅ Step 3: Database initialized');
 
     // 测试初始连接
     logger.info('Testing initial RPC connection...');
@@ -551,12 +554,13 @@ async function main(): Promise<void> {
     );
     logger.info(
       { blockNumber: initialBlock.toString() },
-      'Initial block number'
+      '✅ Step 4: RPC connection verified'
     );
 
     // 执行初始同步
     logger.info('Performing initial database sync...');
     await syncMissingBlocks();
+    logger.info('✅ Step 5: Initial sync completed');
 
     // 设置优雅关闭
     setupGracefulShutdown(async () => {
@@ -568,16 +572,24 @@ async function main(): Promise<void> {
       shutdownRequested = true;
       isRunning = false;
 
+      // 记录最终统计
+      const stats = await blockRepository.getBlockCoverageStats();
+      logger.info({
+        totalBlocks: stats.totalBlocks,
+        coverage: stats.coverage,
+      }, 'Final sync statistics before shutdown');
+
       // 关闭健康检查服务器 (await for proper cleanup)
       await new Promise<void>((resolve) => {
         healthServer.close(() => resolve());
       });
 
       await closeDbConnection();
+      logger.info('✅ Graceful shutdown complete');
     });
 
     // 开始实时监控
-    logger.info('✅ Starting real-time monitoring...');
+    logger.info('✅ Step 6: Starting real-time monitoring...');
     await pollNewBlocks();
   } catch (error) {
     logger.fatal({ error }, '❌ Failed to start indexer');

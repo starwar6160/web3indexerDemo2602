@@ -185,7 +185,7 @@ async function main(): Promise<void> {
 
     // 开始实时监控
     console.log(`[${new Date().toISOString()}] Starting real-time monitoring...`);
-    pollNewBlocks();
+    await pollNewBlocks();
   } catch (error) {
     console.error(`[${new Date().toISOString()}] ❌ Failed to start indexer:`, error);
     await closeDbConnection();

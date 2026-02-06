@@ -46,7 +46,8 @@ export class CheckpointRepository {
    * Save or update a checkpoint
    */
   async saveCheckpoint(checkpoint: Omit<Checkpoint, 'id' | 'synced_at'>): Promise<void> {
-    const now = new Date();
+    const nowIso = new Date().toISOString();
+    const nowDate = new Date();
 
     await this.db
       .insertInto('sync_checkpoints')
@@ -54,19 +55,19 @@ export class CheckpointRepository {
         name: checkpoint.name,
         block_number: checkpoint.block_number,
         block_hash: checkpoint.block_hash,
-        synced_at: now,
-        metadata: checkpoint.metadata ?? null,
-        created_at: now,
-        updated_at: now,
+        synced_at: nowIso,
+        metadata: checkpoint.metadata ? JSON.stringify(checkpoint.metadata) : null,
+        created_at: nowIso,
+        updated_at: nowIso,
       })
       .onConflict((oc) => oc
         .column('name')
         .doUpdateSet({
           block_number: checkpoint.block_number,
           block_hash: checkpoint.block_hash,
-          synced_at: now,
-          metadata: checkpoint.metadata ?? null,
-          updated_at: now,
+          synced_at: nowDate,
+          metadata: checkpoint.metadata || null,
+          updated_at: nowDate,
         })
       )
       .execute();
@@ -91,7 +92,7 @@ export class CheckpointRepository {
       name: result.name,
       block_number: BigInt(result.block_number),
       block_hash: result.block_hash,
-      synced_at: result.synced_at,
+      synced_at: result.synced_at instanceof Date ? result.synced_at.toISOString() : result.synced_at,
       metadata: result.metadata ? JSON.parse(String(result.metadata)) : undefined,
     };
   }
@@ -116,7 +117,7 @@ export class CheckpointRepository {
       name: result.name,
       block_number: BigInt(result.block_number),
       block_hash: result.block_hash,
-      synced_at: result.synced_at,
+      synced_at: result.synced_at instanceof Date ? result.synced_at.toISOString() : result.synced_at,
       metadata: result.metadata ? JSON.parse(String(result.metadata)) : undefined,
     };
   }
@@ -146,7 +147,7 @@ export class CheckpointRepository {
       name: r.name,
       block_number: BigInt(r.block_number),
       block_hash: r.block_hash,
-      synced_at: r.synced_at,
+      synced_at: r.synced_at instanceof Date ? r.synced_at.toISOString() : r.synced_at,
       metadata: r.metadata ? JSON.parse(String(r.metadata)) : undefined,
     }));
   }

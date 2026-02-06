@@ -240,6 +240,20 @@ reset-data:
 	@echo '$(GREEN)✅ Data reset complete!$(NC)'
 	@echo '$(YELLOW)💡 Now run: make dev-with-demo$(NC)'
 
+## demo-reset: Complete demo reset (kill processes + clean DB + restart with demo)
+demo-reset:
+	@echo '$(BLUE)🎬 Complete Demo Reset$(NC)'
+	@echo '$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)'
+	@echo ''
+	@echo '$(BLUE)Step 1: Stopping all processes...$(NC)'
+	@make kill
+	@echo ''
+	@echo '$(BLUE)Step 2: Cleaning database...$(NC)'
+	@make db-clean
+	@echo ''
+	@echo '$(BLUE)Step 3: Deploying demo contract and starting indexer...$(NC)'
+	@make dev-with-demo
+
 ## reset: Reset database volumes and start fresh (⚠️  DESTRUCTIVE - destroys Docker volumes)
 reset:
 	@echo '$(RED)⚠️  WARNING: This will delete all Docker volumes!$(NC)'

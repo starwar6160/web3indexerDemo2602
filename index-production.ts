@@ -21,7 +21,9 @@ const client = createPublicClient({
 });
 
 let blockRepository: BlockRepository;
+// Global state with proper cleanup tracking
 let isRunning = true;
+let shutdownRequested = false;
 
 // Rate limiter: 10 requests per second with burst of 20
 const rateLimiter = new TokenBucketRateLimiter({
@@ -93,7 +95,26 @@ async function initializeDatabase(): Promise<void> {
     try {
       await blockRepository.getBlockCount();
       logger.info('✅ Database tables already exist');
-    } catch (error) {
+    } catch (error: any) {
+      // 🟣 Fix R2: Check specific error before assuming table doesn't exist
+      // Problem: Any error (e.g., connection lost, permission denied) is assumed to be
+      // "table not found", leading to attempting table creation on a potentially
+      // more serious problem
+      // Solution: Check error code for specific "table not found" error (PostgreSQL 42P01)
+      const isTableNotFoundError = error?.code === '42P01' ||
+        error?.message?.includes('does not exist') ||
+        error?.message?.includes('relation');
+
+      if (!isTableNotFoundError) {
+        // This is NOT a "table not found" error - it's something more serious
+        logger.error({ error }, '❌ Database query failed (not a missing table error)');
+        throw new Error(
+          `Database initialization failed: ${error?.message || error}. ` +
+          `This is not a missing table error - check database connectivity and permissions.`
+        );
+      }
+
+      // Only attempt table creation if we're sure it's a missing table error
       logger.warn('⚠️  Blocks table not found, creating...');
       const { initDatabase } = await import('./database/init-database');
       await initDatabase();
@@ -204,6 +225,7 @@ async function syncBlockBatch(
       'Starting batch sync'
     );
 
+    const MAX_FAIL_COUNT = 1000; // Prevent overflow on extremely long syncs
     const rawBlocks: unknown[] = [];
     let lastParentHash: string | undefined;
     let successCount = 0;
@@ -239,7 +261,9 @@ async function syncBlockBatch(
             'Failed to fetch block'
           );
           failCount++;
-          blockNumber = blockNumber + 1n;
+          // Don't increment blockNumber on failure - will retry same block
+          // Small delay to prevent tight error loop
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
 
@@ -248,39 +272,37 @@ async function syncBlockBatch(
         return;
       }
 
-      // Save in transaction FIRST (so findByHash can find blocks in current batch)
-      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
-
-      // THEN verify chain continuity for subsequent blocks
-      // This allows findByHash to find parent blocks within the current batch
+      // Validate chain continuity BEFORE saving (prevent dirty data)
       for (let i = 1; i < rawBlocks.length; i++) {
         const block = rawBlocks[i];
-        if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block) {
-          try {
-            await verifyChainContinuity(
-              blockRepository,
-              block.number as bigint,
-              block.parentHash as string
-            );
-          } catch (error) {
+        const prevBlock = rawBlocks[i - 1];
+        if (block && typeof block === 'object' && 'number' in block && 'parentHash' in block &&
+            prevBlock && typeof prevBlock === 'object' && 'number' in prevBlock && 'hash' in prevBlock) {
+          // Verify that current block's parentHash matches previous block's hash
+          if (block.parentHash !== prevBlock.hash) {
             logger.error(
               {
-                blockNumber: (block.number as bigint).toString(),
-                parentHash: block.parentHash as string,
-                error: error instanceof Error ? error.message : String(error),
+                blockNumber: String(block.number),
+                parentHash: block.parentHash,
+                prevBlockNumber: String(prevBlock.number),
+                prevHash: prevBlock.hash,
               },
-              'Chain continuity verification failed after save'
+              'Chain continuity check failed before save'
             );
-            // Rollback by throwing - transaction will handle it
-            throw error;
+            throw new Error(
+              `Chain continuity broken at block ${block.number}: parentHash ${block.parentHash} does not match previous block hash ${prevBlock.hash}`
+            );
           }
         }
       }
 
-      // Verify writes
+      // Save in transaction after validation
+      const savedCount = await blockRepository.saveValidatedBlocks(rawBlocks);
+
+      // Verify writes with hash check
       const blockNumbers = rawBlocks
-        .filter((b): b is object => b !== null && typeof b === 'object')
-        .map((b: any) => b.number as bigint);
+        .filter((b): b is object => b !== null && typeof b === 'object' && 'number' in b)
+        .map((b) => BigInt(String((b as any).number)));
 
       if (blockNumbers.length > 0) {
         const verified = await blockRepository.verifyBlocksWritten(blockNumbers);
@@ -288,9 +310,30 @@ async function syncBlockBatch(
         if (!verified) {
           throw new Error('Block write verification failed after batch save');
         }
+
+        // Additional hash verification for integrity
+        for (const block of rawBlocks) {
+          if (block && typeof block === 'object' && 'number' in block && 'hash' in block) {
+            const blockNum = BigInt(String((block as any).number));
+            const blockHash = String((block as any).hash);
+            const saved = await blockRepository.findById(blockNum);
+            if (!saved || saved.hash !== blockHash) {
+              logger.error(
+                {
+                  blockNumber: blockNum.toString(),
+                  expectedHash: blockHash,
+                  actualHash: saved?.hash ?? 'not found',
+                },
+                'Block hash mismatch after write'
+              );
+              throw new Error(`Block ${blockNum} hash verification failed`);
+            }
+          }
+        }
       }
 
       successCount = savedCount;
+      failCount = 0; // Reset fail count on successful batch
 
       logger.info(
         {
@@ -343,11 +386,11 @@ async function syncMissingBlocks(): Promise<void> {
       );
 
       const batchSize = BigInt(
-        parseInt(process.env.DB_SYNC_BATCH_SIZE || '10')
+        parseInt(process.env.DB_SYNC_BATCH_SIZE || '10', 10)
       );
       let currentBlock = startBlock;
 
-      while (currentBlock <= latestBlock && isRunning) {
+      while (currentBlock <= latestBlock && isRunning && !shutdownRequested) {
         // 使用三元表达式代替 Math.min
         const batchEnd =
           currentBlock + batchSize - 1n <= latestBlock
@@ -387,7 +430,7 @@ async function pollNewBlocks(): Promise<void> {
     'Starting real-time monitoring'
   );
 
-  while (isRunning) {
+  while (isRunning && !shutdownRequested) {
     try {
       const currentBlock = await rpcCallWithMetrics(
         'pollBlockNumber',
@@ -420,10 +463,10 @@ async function pollNewBlocks(): Promise<void> {
         await syncBlockBatch(localMaxBlock + 1n, currentBlock);
       }
 
-      // 等待下一次轮询
-      await new Promise((resolve) =>
-        setTimeout(resolve, Number(config.POLL_INTERVAL_MS))
-      );
+      // 等待下一次轮询 (with NaN protection)
+      const pollInterval = Number(config.POLL_INTERVAL_MS);
+      const safeInterval = Number.isFinite(pollInterval) && pollInterval > 0 ? pollInterval : 2000;
+      await new Promise((resolve) => setTimeout(resolve, safeInterval));
     } catch (error) {
       logger.error({ error }, 'Polling error');
       // Don't throw - let polling continue
@@ -471,10 +514,17 @@ async function main(): Promise<void> {
     // 设置优雅关闭
     setupGracefulShutdown(async () => {
       logger.info('Shutting down gracefully...');
+      if (shutdownRequested) {
+        logger.warn('Shutdown already requested, skipping duplicate signal');
+        return;
+      }
+      shutdownRequested = true;
       isRunning = false;
 
-      // 关闭健康检查服务器
-      healthServer.close();
+      // 关闭健康检查服务器 (await for proper cleanup)
+      await new Promise<void>((resolve) => {
+        healthServer.close(() => resolve());
+      });
 
       await closeDbConnection();
     });

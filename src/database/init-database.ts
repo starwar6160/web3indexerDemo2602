@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 export async function initDatabase(): Promise<void> {
   console.log('[INIT] Initializing database...');
 
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   try {
     // 尝试查询 blocks 表，如果表不存在会抛出错误
@@ -134,6 +134,62 @@ export async function initDatabase(): Promise<void> {
       console.log('[INIT] ✅ Composite unique index created (idempotency)');
     } catch (error) {
       // 索引可能已存在
+    }
+
+    // Phase 5: Create transfers table for ERC20/token transfer events
+    try {
+      await db.schema
+        .createTable('transfers')
+        .addColumn('id', 'serial', (col) => col.primaryKey())
+        .addColumn('block_number', 'bigint', (col) => col.notNull())
+        .addColumn('transaction_hash', 'varchar(66)', (col) => col.notNull())
+        .addColumn('log_index', 'integer', (col) => col.notNull())
+        .addColumn('from_address', 'varchar(42)', (col) => col.notNull())
+        .addColumn('to_address', 'varchar(42)', (col) => col.notNull())
+        .addColumn('amount', 'varchar(78)', (col) => col.notNull()) // String to preserve BigInt precision
+        .addColumn('token_address', 'varchar(42)', (col) => col.notNull())
+        .addColumn('timestamp', 'timestamptz', (col) =>
+          col.notNull().defaultTo(sql`now()`)
+        )
+        .addColumn('created_at', 'timestamptz', (col) =>
+          col.notNull().defaultTo(sql`now()`)
+        )
+        .execute();
+
+      // Create indexes for performance-critical queries
+      await db.schema
+        .createIndex('idx_transfers_block_number')
+        .on('transfers')
+        .column('block_number')
+        .execute();
+
+      await db.schema
+        .createIndex('idx_transfers_from_address')
+        .on('transfers')
+        .column('from_address')
+        .execute();
+
+      await db.schema
+        .createIndex('idx_transfers_to_address')
+        .on('transfers')
+        .column('to_address')
+        .execute();
+
+      await db.schema
+        .createIndex('idx_transfers_token_address')
+        .on('transfers')
+        .column('token_address')
+        .execute();
+
+      await db.schema
+        .createIndex('idx_transfers_tx_hash')
+        .on('transfers')
+        .column('transaction_hash')
+        .execute();
+
+      console.log('[INIT] ✅ Transfers table created with indexes');
+    } catch (error) {
+      console.log('[INIT] Transfers table already exists');
     }
 
     console.log('[INIT] ✅ Database initialization completed');

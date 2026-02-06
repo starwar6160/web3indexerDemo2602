@@ -137,7 +137,7 @@ export class SyncEngine {
           from_address: String(decoded.args?.from || '0x0'),
           to_address: String(decoded.args?.to || '0x0'),
           amount: String(decoded.args?.value || '0'),
-          contract_address: this.config.tokenContract!,
+          token_address: this.config.tokenContract!,
         };
       });
     } catch (error) {

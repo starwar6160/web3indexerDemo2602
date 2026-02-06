@@ -13,7 +13,7 @@ export interface Transfer {
   from_address: string;
   to_address: string;
   amount: string; // DECIMAL(78,18) as string for uint256
-  contract_address: string; // ERC20 token contract
+  token_address: string; // ERC20 token contract
   created_at?: Date;
 }
 
@@ -39,7 +39,7 @@ export class TransfersRepository {
         from_address VARCHAR(42) NOT NULL,
         to_address VARCHAR(42) NOT NULL,
         amount DECIMAL(78,18) NOT NULL,
-        contract_address VARCHAR(42) NOT NULL,
+        token_address VARCHAR(42) NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
         
         -- Composite unique constraint for idempotency
@@ -62,11 +62,11 @@ export class TransfersRepository {
       CREATE INDEX IF NOT EXISTS idx_transfers_to 
         ON transfers(to_address);
       CREATE INDEX IF NOT EXISTS idx_transfers_contract 
-        ON transfers(contract_address);
+        ON transfers(token_address);
         
       -- Composite index for common queries
       CREATE INDEX IF NOT EXISTS idx_transfers_block_contract 
-        ON transfers(block_number, contract_address);
+        ON transfers(block_number, token_address);
     `.execute(this.db);
   }
 
@@ -90,7 +90,7 @@ export class TransfersRepository {
           from_address: t.from_address,
           to_address: t.to_address,
           amount: t.amount,
-          contract_address: t.contract_address,
+          token_address: t.token_address,
         }))
       )
       .onConflict((oc: any) =>
@@ -99,7 +99,7 @@ export class TransfersRepository {
           from_address: (trx: any) => trx.ref('excluded.from_address'),
           to_address: (trx: any) => trx.ref('excluded.to_address'),
           amount: (trx: any) => trx.ref('excluded.amount'),
-          contract_address: (trx: any) => trx.ref('excluded.contract_address'),
+          token_address: (trx: any) => trx.ref('excluded.token_address'),
         })
       )
       .execute();
@@ -140,7 +140,7 @@ export class TransfersRepository {
       from_address: r.from_address,
       to_address: r.to_address,
       amount: r.amount,
-      contract_address: r.contract_address,
+      token_address: r.token_address,
       created_at: r.created_at,
     }));
   }
@@ -168,7 +168,7 @@ export class TransfersRepository {
       from_address: r.from_address,
       to_address: r.to_address,
       amount: r.amount,
-      contract_address: r.contract_address,
+      token_address: r.token_address,
       created_at: r.created_at,
     }));
   }

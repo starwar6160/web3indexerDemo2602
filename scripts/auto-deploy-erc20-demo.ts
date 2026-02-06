@@ -81,15 +81,13 @@ const ERC20_BYTECODE = '0x608060405234801561001057600080fd5b50610121806100206000
  * Test accounts (Anvil default)
  * Private keys must be exactly 32 bytes (64 hex chars + 0x prefix)
  */
-const PRIVATE_KEYS = [
-  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
-  '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
-  '0x70997970c51812dc3a010c7d01b50e0d17dc79c82803f146c8e4d3667efb74631',
-  '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc8333b8eff4b6b7011844f383',
-] as const;
+const ACCOUNT_1 = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
+const ACCOUNT_2 = privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
+const ACCOUNT_3 = privateKeyToAccount('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a');
+const ACCOUNT_4 = privateKeyToAccount('0x70997970c51812dc3a010c7d01b50e0d17dc79c82803f146c8e4d3667efb74631');
+const ACCOUNT_5 = privateKeyToAccount('0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc8333b8eff4b6b7011844f383');
 
-const ACCOUNTS = PRIVATE_KEYS.map(pk => privateKeyToAccount(pk));
+const ACCOUNTS = [ACCOUNT_1, ACCOUNT_2, ACCOUNT_3, ACCOUNT_4, ACCOUNT_5];
 
 /**
  * Main deployment function

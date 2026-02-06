@@ -225,9 +225,24 @@ clean-all: clean
 	rm -rf node_modules
 	@echo '$(GREEN)✅ node_modules removed$(NC)'
 
-## reset: Reset database and start fresh (⚠️  DESTRUCTIVE)
+## db-clean: Truncate all data tables (keeps schema)
+db-clean:
+	@echo '$(BLUE)🗑️  Truncating database tables...$(NC)'
+	docker exec web3-indexer-db psql -U postgres -d web3_indexer -c "TRUNCATE blocks, transfers, sync_checkpoints RESTART IDENTITY CASCADE;"
+	@echo '$(GREEN)✅ Database tables truncated$(NC)'
+	@echo '$(YELLOW)💡 All data cleared. Indexer will start from block 0.$(NC)'
+
+## reset-data: Clean database and prepare for fresh demo (non-destructive)
+reset-data:
+	@echo '$(BLUE)🔄 Resetting data for fresh demo...$(NC)'
+	@make kill
+	@make db-clean
+	@echo '$(GREEN)✅ Data reset complete!$(NC)'
+	@echo '$(YELLOW)💡 Now run: make dev-with-demo$(NC)'
+
+## reset: Reset database volumes and start fresh (⚠️  DESTRUCTIVE - destroys Docker volumes)
 reset:
-	@echo '$(RED)⚠️  WARNING: This will delete all data!$(NC)'
+	@echo '$(RED)⚠️  WARNING: This will delete all Docker volumes!$(NC)'
 	@read -p "Are you sure? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \

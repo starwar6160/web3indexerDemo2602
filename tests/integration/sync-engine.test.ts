@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { SyncEngine } from '../../src/sync-engine';
-import { createDbConnection, closeDbConnection } from '../../src/database/database-config';
+import { SyncEngine } from '@/sync-engine';
+import { createDbConnection, closeDbConnection } from '@/database/database-config';
 
 /**
  * Sync Engine Transactional Integrity Test
@@ -60,7 +60,7 @@ describe('Sync Engine Transactional Integrity', () => {
     ];
 
     // Simulate the validation and conversion
-    const { validateBlocks, toDbBlock } = await import('../../src/database/schemas');
+    const { validateBlocks, toDbBlock } = await import('@/database/schemas');
     
     const validatedBlocks = validateBlocks(blocksToSave);
     expect(validatedBlocks).toBeDefined();

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { createApiServer } from '../../src/api/server';
+import { createApiServer } from '@/api/server';
 
 /**
  * API Data Safety Test

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
-import { BlockRepository } from '../../src/database/block-repository';
-import { getDb, closeDbConnection, createDbConnection } from '../../src/database/database-config';
+import { BlockRepository } from '@/database/block-repository';
+import { getDb, closeDbConnection, createDbConnection } from '@/database/database-config';
 
 /**
  * Reorg Integration Test

@@ -14,7 +14,8 @@ describe('BigInt Type Safety', () => {
   describe('Type Coercion Prevention', () => {
     it('should reject Number() conversion of large BigInt', () => {
       // This demonstrates the 2^53 precision loss
-      const bigNum = MAX_SAFE_INTEGER_PLUS_1;
+      // Use a number that actually loses precision (> 2^53 + 2)
+      const bigNum = 9007199254740995n; // MAX_SAFE_INTEGER + 4
       
       // C++ Rigor: Explicit conversion check
       expect(() => {
@@ -26,7 +27,7 @@ describe('BigInt Type Safety', () => {
         if (correct !== bigNum) {
           throw new Error(`Precision lost: ${correct} !== ${bigNum}`);
         }
-      }).toThrow();
+      }).toThrow('Precision lost');
     });
 
     it('should maintain precision when converting BigInt to string', () => {

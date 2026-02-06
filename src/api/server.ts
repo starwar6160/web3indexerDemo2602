@@ -4,12 +4,12 @@ import rateLimit from 'express-rate-limit';
 import { createPublicClient, http } from 'viem';
 import { z } from 'zod';
 import { sql } from 'kysely';
-import { BlockRepository } from './database/block-repository';
-import { TransfersRepository } from './database/transfers-repository';
-import { SyncStatusRepository } from './database/sync-status-repository';
-import { getDb } from './database/database-config';
-import logger from './utils/logger';
-import { metrics } from './utils/metrics-collector';
+import { BlockRepository } from '../database/block-repository';
+import { TransfersRepository } from '../database/transfers-repository';
+import { SyncStatusRepository } from '../database/sync-status-repository';
+import { getDb } from '../database/database-config';
+import logger from '../utils/logger';
+import { metrics } from '../utils/metrics-collector';
 
 /**
  * BigInt-safe JSON serializer
@@ -291,7 +291,8 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
       if (contractAddress) {
         transfers = await transfersRepo.getByContract(contractAddress, limit);
       } else {
-        transfers = await transfersRepo.db
+        // Use getDb directly instead of accessing private property
+        transfers = await getDb()
           .selectFrom('transfers')
           .selectAll()
           .orderBy('block_number', 'desc')

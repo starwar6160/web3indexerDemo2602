@@ -78,6 +78,64 @@ export async function initDatabase(): Promise<void> {
       // 索引可能已存在
     }
 
+    // Phase 3 Fix: Create transactions table for decoded event data
+    try {
+      await db.schema
+        .createTable('transactions')
+        .addColumn('id', 'serial', (col) => col.primaryKey())
+        .addColumn('tx_hash', 'varchar(66)', (col) => col.notNull().unique())
+        .addColumn('block_number', 'bigint', (col) => col.notNull())
+        .addColumn('from_address', 'varchar(42)', (col) => col.notNull())
+        .addColumn('to_address', 'varchar(42)')
+        .addColumn('value', sql`decimal(78,18)`) // Phase 4: DECIMAL for token amounts
+        .addColumn('gas_price', sql`decimal(78,18)`)
+        .addColumn('gas_used', 'bigint')
+        .addColumn('status', 'integer') // 1 = success, 0 = failed
+        .addColumn('created_at', 'timestamptz', (col) =>
+          col.notNull().defaultTo(sql`now()`)
+        )
+        .execute();
+      console.log('[INIT] ✅ Transactions table created');
+    } catch (error) {
+      console.log('[INIT] Transactions table already exists');
+    }
+
+    // Phase 3 Fix: Create sync_status table for detailed progress tracking
+    try {
+      await db.schema
+        .createTable('sync_status')
+        .addColumn('id', 'serial', (col) => col.primaryKey())
+        .addColumn('processor_name', 'varchar(255)', (col) => col.notNull().unique())
+        .addColumn('last_processed_block', 'bigint', (col) => col.notNull())
+        .addColumn('last_processed_hash', 'varchar(66)')
+        .addColumn('target_block', 'bigint')
+        .addColumn('synced_percent', sql`decimal(5,2)`) // 0.00 - 100.00
+        .addColumn('status', 'varchar(20)', (col) =>
+          col.notNull().defaultTo('active')
+        ) // active, paused, error, complete
+        .addColumn('error_message', 'text')
+        .addColumn('updated_at', 'timestamptz', (col) =>
+          col.notNull().defaultTo(sql`now()`)
+        )
+        .execute();
+      console.log('[INIT] ✅ Sync status table created');
+    } catch (error) {
+      console.log('[INIT] Sync status table already exists');
+    }
+
+    // Phase 4 Fix: Add composite unique index for idempotency
+    try {
+      await db.schema
+        .createIndex('idx_tx_block_log_unique')
+        .on('transactions')
+        .columns(['block_number', 'tx_hash'])
+        .unique()
+        .execute();
+      console.log('[INIT] ✅ Composite unique index created (idempotency)');
+    } catch (error) {
+      // 索引可能已存在
+    }
+
     console.log('[INIT] ✅ Database initialization completed');
 
   } catch (error) {

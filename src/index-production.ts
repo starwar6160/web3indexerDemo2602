@@ -4,6 +4,7 @@ import 'dotenv/config';
 import { createPublicClient, http } from 'viem';
 import { closeDbConnection, createDbConnection } from './database/database-config';
 import { BlockRepository } from './database/block-repository';
+import { runMigrations } from './database/migration-runner';
 import logger, { logSamplers, generateTraceId, withTraceId } from './utils/logger';
 import { config } from './utils/config';
 import { setupGlobalErrorHandlers, setupGracefulShutdown } from './utils/error-handlers';
@@ -121,6 +122,12 @@ async function initializeDatabase(): Promise<void> {
       await initDatabase();
       logger.info('✅ Database tables created');
     }
+
+    // Phase 4: Auto-run migrations (idempotent - skips already applied)
+    logger.info('Running automatic migrations...');
+    const migrationResults = await runMigrations();
+    const appliedCount = migrationResults.filter(r => r.success).length;
+    logger.info({ appliedCount }, '✅ Migrations complete');
 
     logger.info('✅ Database connection established');
   } catch (error) {

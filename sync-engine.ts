@@ -49,6 +49,17 @@ export class SyncEngine {
   private currentRpcIndex = 0; // Round-robin index
 
   constructor(config: SyncEngineConfig) {
+    // 🟡 Fix A2: Validate batchSize boundaries
+    // Problem: Extremely large batchSize (e.g., > 1000) could cause memory issues
+    // Solution: Enforce reasonable limits at construction time
+    if (config.batchSize <= 0 || config.batchSize > 100) {
+      throw new Error(
+        `Invalid batchSize: ${config.batchSize}. ` +
+        `Must be between 1 and 100. ` +
+        `This limit prevents memory exhaustion from large batches.`
+      );
+    }
+
     this.config = config;
     this.blockRepository = new BlockRepository();
     this.logRepository = new LogRepository(); // P3 Fix
@@ -87,6 +98,18 @@ export class SyncEngine {
     expectedParentHash?: string
   ): Promise<BatchSyncResult> {
     console.log(`[SyncEngine] Syncing batch ${startBlock} to ${endBlock}`);
+
+    // 🟣 Fix R4: Check batch size to prevent V8 heap exhaustion
+    // Problem: Very large batches (even with batchSize=100 limit) could cause memory issues
+    // Solution: Verify batch size is reasonable before allocating arrays
+    const batchLength = Number(endBlock - startBlock + 1n);
+    if (batchLength > 1000) {
+      throw new Error(
+        `Batch size ${batchLength} exceeds safe limit of 1000 blocks. ` +
+        `This could cause V8 heap exhaustion. ` +
+        `Please reduce batchSize or sync in smaller chunks.`
+      );
+    }
 
     const blocksToSave: Block[] = [];
     let currentParentHash = expectedParentHash;
@@ -198,7 +221,10 @@ export class SyncEngine {
         );
 
         // Check if this is a reorg by looking up the block in database
-        const existingBlock = await this.blockRepository.findById(block.number);
+        // 🔵 Fix D5: Use SELECT FOR UPDATE to lock the row during transaction
+        // Problem: Reading (findById) and writing (insert) in same transaction without lock
+        // Solution: Lock the row to prevent concurrent modifications
+        const existingBlock = await this.blockRepository.findByIdForUpdate(block.number);
 
         if (existingBlock && existingBlock.hash !== block.hash) {
           console.warn(

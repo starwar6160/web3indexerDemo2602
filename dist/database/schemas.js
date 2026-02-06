@@ -69,13 +69,17 @@ function safeValidateBlock(data) {
 /**
  * 批量验证区块数据
  * @param blocks - 区块数据数组
- * @returns 验证后的区块数据数组（过滤掉无效数据）
+ * @returns 验证后的区块数据数组
+ * @throws {Error} 如果任何一个区块验证失败，立即抛出异常（SpaceX哲学）
+ *
+ * CRITICAL: 使用 parse() 而不是 safeParse()
+ * - 任何一个区块格式错误 → 整个批次失败
+ * - 静默跳过 = 数据完整性风险
+ * - "炸得早"胜过"静默错误"
  */
 function validateBlocks(blocks) {
-    return blocks
-        .map((block) => safeValidateBlock(block))
-        .filter((result) => result.success)
-        .map((result) => result.data);
+    // SpaceX哲学: 当场炸，不要吞异常
+    return blocks.map((block) => exports.BlockSchema.parse(block));
 }
 /**
  * 转换为数据库格式

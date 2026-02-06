@@ -7,11 +7,11 @@ export interface Database {
 }
 
 export interface BlockTable {
-  number: ColumnType<bigint, string | number, bigint>;
+  number: ColumnType<bigint, bigint, bigint>;  // C++风格：全链路bigint
   hash: string;
-  timestamp: ColumnType<bigint, string | number, bigint>;
+  timestamp: ColumnType<bigint, bigint, bigint>;  // C++风格：全链路bigint
   parent_hash: string;
-  chain_id: ColumnType<bigint, string | number, bigint>;
+  chain_id: ColumnType<bigint, bigint, bigint>;  // C++风格：全链路bigint
   created_at: ColumnType<Date, string, Date>;
   updated_at: ColumnType<Date, string, Date>;
 }
@@ -19,7 +19,7 @@ export interface BlockTable {
 export interface CheckpointTable {
   id: Generated<number>;
   name: string;
-  block_number: ColumnType<bigint, string | number, bigint>;
+  block_number: ColumnType<bigint, bigint, bigint>;  // C++风格：全链路bigint
   block_hash: string;
   synced_at: ColumnType<Date, string, Date>;
   metadata: ColumnType<Record<string, any> | null, string | null, Record<string, any> | null>;

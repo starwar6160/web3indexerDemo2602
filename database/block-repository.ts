@@ -82,16 +82,16 @@ export class BlockRepository {
             .insertInto('blocks')
             .values({
               ...block,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+              created_at: new Date().toISOString(),  // ✅ 字符串格式
+              updated_at: new Date().toISOString(),  // ✅ 字符串格式
             })
             .onConflict((oc) => oc
-              .column(['chain_id', 'number'])
+              .constraint('blocks_chain_number_unique')  // ✅ 使用约束名
               .doUpdateSet({
                 hash: block.hash,
                 parent_hash: block.parent_hash,
                 timestamp: block.timestamp,
-                updated_at: new Date().toISOString(),
+                updated_at: new Date(),  // ✅ doUpdateSet需要Date对象
               })
               .where('blocks.hash', '!=', block.hash)
             )

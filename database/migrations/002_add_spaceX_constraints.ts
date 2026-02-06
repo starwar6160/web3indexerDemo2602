@@ -119,6 +119,7 @@ export async function up(): Promise<void> {
     );
   `.execute(db);
 
+  // @ts-ignore - Kysely sql template type limitation
   if (tableExists.rows[0]?.exists) {
     await sql`
       ALTER TABLE transaction_logs DROP CONSTRAINT IF EXISTS transaction_logs_tx_log_unique;

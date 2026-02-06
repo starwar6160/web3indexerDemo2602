@@ -17,6 +17,7 @@ import {
   verifyChainContinuity,
   handleReorg,
 } from './utils/reorg-handler';
+import { metrics } from './utils/metrics-collector';
 
 const client = createPublicClient({
   transport: http(config.RPC_URL),
@@ -72,6 +73,9 @@ async function rpcCallWithMetrics<T>(
 
     const latency = Date.now() - startTime;
     recordRpcCall(true, latency);
+
+    // 🎯 Metrics: Record RPC call latency
+    metrics.recordRpcLatency(operation, latency);
 
     return result.data as T;
   } catch (error) {
@@ -382,6 +386,11 @@ async function syncBlockBatch(
         },
         '✅ Batch sync completed'
       );
+
+      // 🎯 Metrics: Record batch processing time and update counters
+      metrics.recordDbWrite(true, Date.now(), rawBlocks.length);
+      metrics.incrementBlocksIndexed(rawBlocks.length);
+      metrics.updateLastSyncedBlock(endBlock);
     } catch (error) {
       logger.error(
         {

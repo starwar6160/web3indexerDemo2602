@@ -7,6 +7,7 @@ import { TransfersRepository } from './database/transfers-repository';
 import { SyncStatusRepository } from './database/sync-status-repository';
 import { getDb } from './database/database-config';
 import logger from './utils/logger';
+import { metrics } from './utils/metrics-collector';
 
 /**
  * BigInt-safe JSON serializer
@@ -320,6 +321,21 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  /**
+   * GET /metrics
+   * Prometheus-style metrics endpoint for observability
+   */
+  app.get('/metrics', (req: Request, res: Response) => {
+    try {
+      const prometheusMetrics = metrics.getPrometheusMetrics();
+      res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+      res.send(prometheusMetrics);
+    } catch (error) {
+      logger.error({ error }, 'Failed to generate metrics');
+      res.status(500).json({ error: 'Failed to generate metrics' });
+    }
   });
 
   /**

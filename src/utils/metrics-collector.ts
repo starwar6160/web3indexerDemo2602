@@ -220,8 +220,33 @@ export class MetricsCollector extends EventEmitter {
   }
 
   /**
-   * 检查告警阈值
+   * Record RPC latency (alias for recordRpcCall for compatibility)
    */
+  recordRpcLatency(operation: string, latency: number): void {
+    this.recordRpcCall(true, latency);
+  }
+
+  /**
+   * Increment blocks indexed counter
+   */
+  incrementBlocksIndexed(count: number = 1): void {
+    // Track in sync state
+    this.metrics.sync.currentBlock += BigInt(count);
+  }
+
+  /**
+   * Update last synced block
+   */
+  updateLastSyncedBlock(blockNumber: bigint): void {
+    this.metrics.sync.currentBlock = blockNumber;
+  }
+
+  /**
+   * Increment reorgs detected
+   */
+  incrementReorgsDetected(count: number = 1): void {
+    this.metrics.reorgs.detected += count;
+  }
   checkAlerts(config: {
     rpcErrorRate: number;
     syncLagBlocks: number;

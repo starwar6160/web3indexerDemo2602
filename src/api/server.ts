@@ -37,6 +37,44 @@ function bigIntSafeJsonMiddleware() {
 }
 
 /**
+ * Validate numeric string (digits only)
+ * Prevents BigInt conversion errors and injection attacks
+ */
+function isValidNumberString(str: unknown): str is string {
+  return typeof str === 'string' && /^\d+$/.test(str);
+}
+
+/**
+ * Validate and parse limit parameter
+ */
+function parseLimitParam(value: unknown): number {
+  if (value === undefined || value === '') return 20;
+  if (!isValidNumberString(value)) {
+    throw new Error('Invalid limit parameter: must be positive integer');
+  }
+  const num = parseInt(value, 10);
+  if (!Number.isFinite(num) || num < 1) {
+    throw new Error('Invalid limit parameter: must be positive integer');
+  }
+  return Math.min(num, 100);
+}
+
+/**
+ * Validate and parse offset parameter
+ */
+function parseOffsetParam(value: unknown): number {
+  if (value === undefined || value === '') return 0;
+  if (!isValidNumberString(value)) {
+    throw new Error('Invalid offset parameter: must be non-negative integer');
+  }
+  const num = parseInt(value, 10);
+  if (!Number.isFinite(num) || num < 0) {
+    throw new Error('Invalid offset parameter: must be non-negative integer');
+  }
+  return num;
+}
+
+/**
  * API Server Configuration
  */
 export interface ApiServerConfig {
@@ -141,8 +179,8 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/api/blocks', async (req: Request, res: Response) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-      const offset = parseInt(req.query.offset as string) || 0;
+      const limit = parseLimitParam(req.query.limit);
+      const offset = parseOffsetParam(req.query.offset);
 
       const blocks = await blockRepo.db
         .selectFrom('blocks')
@@ -184,7 +222,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/api/transfers', async (req: Request, res: Response) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+      const limit = parseLimitParam(req.query.limit);
       const contractAddress = req.query.contract as string | undefined;
 
       let transfers;
@@ -232,6 +270,10 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/api/blocks/:number', async (req: Request, res: Response) => {
     try {
+      if (!isValidNumberString(req.params.number)) {
+        res.status(400).json({ error: 'Invalid block number: must be positive integer' });
+        return;
+      }
       const blockNumber = BigInt(req.params.number);
 
       const [block, transfers] = await Promise.all([
@@ -306,7 +348,6 @@ async function checkDbHealth(): Promise<boolean> {
     return false;
   }
 }
-
 /**
  * Start API server
  */

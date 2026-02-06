@@ -42,9 +42,8 @@ export function createDbConnection(): Kysely<Database> {
       dialect,
     });
 
-    // Verify connection works before returning
-    // This ensures dbInstance is only set if connection is valid
-    void dbInstance.selectFrom('blocks').select('number').limit(1).execute();
+    // Note: Connection is verified on first actual query
+    // The pg pool handles connection errors gracefully
 
     return dbInstance;
   } catch (error) {

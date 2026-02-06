@@ -12,6 +12,7 @@
     "dev": "ts-node src/index-production.ts",
     "dev:failfast": "ts-node src/index-failfast.ts",
     "dev:legacy": "ts-node src/index.ts",
+    "dev:with-demo": "ts-node scripts/auto-deploy-erc20-demo.ts && npm run dev-full",
     "db:init": "ts-node scripts/migrate-database.ts",
     "db:migrate": "ts-node scripts/migrate-database.ts",
     "db:status": "ts-node scripts/check-database.ts",

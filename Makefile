@@ -89,6 +89,20 @@ dev-full:
 	npm run start:api:dev & \
 	wait
 
+## dev-with-demo: Deploy ERC20 demo data, then start indexer + API (one-click demo)
+dev-with-demo:
+	@echo '$(BLUE)🎨 Starting Web3 Indexer with ERC20 Demo Data...$(NC)'
+	@echo ''
+	@echo '$(BLUE)Step 1: Generating demo data...$(NC)'
+	npx ts-node scripts/auto-deploy-erc20-demo.ts
+	@echo ''
+	@echo '$(BLUE)Step 2: Starting indexer + API...$(NC)'
+	@echo '$(BLUE)API Dashboard:$(NC) $(YELLOW)http://localhost:3001/dashboard$(NC)'
+	@echo ''
+	@make --no-print-directory dev & \
+	npm run start:api:dev & \
+	wait
+
 ## dev-watch: Run indexer with file watching
 dev-watch:
 	@echo '$(BLUE)👀 Starting indexer with file watching...$(NC)'
@@ -123,6 +137,14 @@ test-api:
 	@echo '$(BLUE)🌐 Running API tests...$(NC)'
 	npm test -- tests/api/
 	@echo '$(GREEN)✅ API tests complete$(NC)'
+
+## test-erc20-demo: Run ERC20 Transfer event integration demo
+test-erc20-demo:
+	@echo '$(BLUE)🎨 Running ERC20 Transfer Event Demo...$(NC)'
+	@echo '$(YELLOW)⚠️  Requires: Anvil running on port 58545 (run "make up" first)$(NC)'
+	@echo ''
+	npm test -- tests/integration/erc20-transfer-demo.test.ts
+	@echo '$(GREEN)✅ ERC20 Demo complete$(NC)'
 
 ## coverage: Generate test coverage report
 coverage:

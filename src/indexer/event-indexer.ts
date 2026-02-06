@@ -112,12 +112,20 @@ export class EventIndexer {
     txHash: string;
     logIndex: number;
   }> {
-    return logs.map((log) => {
+    const decodedEvents = logs.map((log) => {
       try {
         const decoded = decodeEventLog({
           abi: simpleBankAbi,
           data: log.data as `0x${string}`,
           topics: log.topics as [`0x${string}`, ...`0x${string}`[]],
+        });
+
+        // Enhanced diagnostic logging
+        console.log('🔍 [EVENT DECODED]', {
+          eventName: decoded.eventName,
+          blockNumber: log.blockNumber.toString(),
+          txHash: log.transactionHash,
+          args: decoded.args,
         });
 
         return {
@@ -132,6 +140,16 @@ export class EventIndexer {
         throw new Error(`Failed to decode event: ${error}`);
       }
     });
+
+    // Log event type distribution
+    const eventCounts = decodedEvents.reduce((acc, e) => {
+      acc[e.eventName] = (acc[e.eventName] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    console.log('📊 [EVENT DISTRIBUTION]', eventCounts);
+
+    return decodedEvents;
   }
 
   /**
@@ -146,18 +164,31 @@ export class EventIndexer {
       logIndex: number;
     }>
   ): Omit<Transaction, 'id' | 'created_at'>[] {
-    return events
-      .filter((e) => e.eventName === 'Deposit') // Only index deposits for now
-      .map((event) => ({
+    const filtered = events.filter((e) => e.eventName === 'Transfer'); // Index Transfer events (called by demo script)
+
+    console.log(`✅ [FILTER] Kept ${filtered.length}/${events.length} Transfer events`);
+
+    return filtered.map((event) => {
+      const tx = {
         tx_hash: event.txHash,
         block_number: event.blockNumber,
         from_address: String(event.args.from || '0x0'),
-        to_address: this.contractAddress,
-      value: String(event.args.amount || '0'),
-      gas_price: null,
-      gas_used: null,
-      status: 1, // success
-    }));
+        to_address: String(event.args.to || '0x0'),
+        value: String(event.args.amount || '0'),
+        gas_price: null,
+        gas_used: null,
+        status: 1, // success
+      };
+
+      console.log('💾 [TO SAVE]', {
+        txHash: tx.tx_hash,
+        from: tx.from_address,
+        to: tx.to_address,
+        amount: tx.value,
+      });
+
+      return tx;
+    });
   }
 
   /**

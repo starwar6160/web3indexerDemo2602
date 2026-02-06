@@ -78,7 +78,6 @@ const anvilChain: Chain = {
   id: 31337,
   name: 'Anvil',
   network: 'anvil',
-  networkId: 'anvil',
   nativeCurrency: {
     decimals: 18,
     name: 'Ether',

@@ -10,6 +10,7 @@ import { setupGlobalErrorHandlers, setupGracefulShutdown } from './utils/error-h
 import { startHealthServer, recordRpcCall } from './utils/health-server';
 import { retryWithBackoffSelective } from './utils/retry';
 import { TokenBucketRateLimiter } from './utils/rate-limiter';
+import pLimit from 'p-limit';
 import {
   detectReorg,
   verifyChainContinuity,
@@ -232,40 +233,70 @@ async function syncBlockBatch(
     let failCount = 0;
 
     try {
-      // Fetch blocks with rate limiting
-      let blockNumber = startBlock;
-      while (blockNumber <= endBlock) {
-        try {
-          const block = await rpcCallWithMetrics(
-            `getBlock-${blockNumber}`,
-            () => client.getBlock({ blockNumber })
-          );
+      // P0 Fix: Parallel block fetching with concurrency control using p-limit
+      const concurrency = 10; // Configurable: 10 concurrent requests
+      const limit = pLimit(concurrency);
 
-          rawBlocks.push(block);
+      // Create array of block numbers to fetch
+      const blockNumbersToFetch: bigint[] = [];
+      for (let bn = startBlock; bn <= endBlock; bn++) {
+        blockNumbersToFetch.push(bn);
+      }
 
-          // Store parent hash for next iteration
-          lastParentHash = block.parentHash;
+      logger.info(
+        { count: blockNumbersToFetch.length, concurrency },
+        'Fetching blocks in parallel'
+      );
 
-          // Sampled logging
-          if (logSamplers.perBlock.shouldLog()) {
-            logger.trace(
-              { blockNumber: blockNumber.toString(), hash: block.hash },
-              'Fetched block'
+      // Fetch blocks in parallel with controlled concurrency
+      const fetchPromises = blockNumbersToFetch.map((blockNumber) =>
+        limit(async () => {
+          try {
+            const block = await rpcCallWithMetrics(
+              `getBlock-${blockNumber}`,
+              () => client.getBlock({ blockNumber })
             );
-          }
 
-          blockNumber = blockNumber + 1n;
-        } catch (error) {
-          logger.error(
-            { error, blockNumber: blockNumber.toString() },
-            'Failed to fetch block'
-          );
+            // Sampled logging
+            if (logSamplers.perBlock.shouldLog()) {
+              logger.trace(
+                { blockNumber: blockNumber.toString(), hash: block.hash },
+                'Fetched block'
+              );
+            }
+
+            return { success: true, block, blockNumber };
+          } catch (error) {
+            logger.error(
+              { error, blockNumber: blockNumber.toString() },
+              'Failed to fetch block'
+            );
+            return { success: false, error, blockNumber };
+          }
+        })
+      );
+
+      // Wait for all fetches to complete
+      const results = await Promise.all(fetchPromises);
+
+      // Process results
+      for (const result of results) {
+        if (result.success && result.block) {
+          rawBlocks.push(result.block);
+          lastParentHash = result.block.parentHash;
+        } else {
           failCount++;
-          // Don't increment blockNumber on failure - will retry same block
-          // Small delay to prevent tight error loop
-          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
+
+      // Sort blocks by number to ensure correct order for continuity check
+      rawBlocks.sort((a: any, b: any) => {
+        if (a && typeof a === 'object' && 'number' in a &&
+            b && typeof b === 'object' && 'number' in b) {
+          return Number(a.number) - Number(b.number);
+        }
+        return 0;
+      });
 
       if (rawBlocks.length === 0) {
         logger.warn('No blocks fetched in this batch');

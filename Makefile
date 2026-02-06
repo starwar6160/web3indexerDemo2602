@@ -223,6 +223,24 @@ status:
 	@echo '$(BLUE)Tests:$(NC)'
 	@npm test 2>&1 | tail -3
 
+## ip: Show WSL IP and access URLs
+ip:
+	@echo '$(BLUE)🌐 Network Access Information$(NC)'
+	@echo ''
+	@echo '$(BLUE)WSL IP Address:$(NC) ' $$(hostname -I | awk '{print $$1}')
+	@echo ''
+	@echo '$(BLUE)Access URLs:$(NC)'
+	@echo '  Dashboard: $(YELLOW)http://'$$(hostname -I | awk '{print $$1}')':3001/dashboard$(NC)'
+	@echo '  API Docs:  $(YELLOW)http://'$$(hostname -I | awk '{print $$1}')':3001/docs$(NC)'
+	@echo '  Health:    $(YELLOW)http://'$$(hostname -I | awk '{print $$1}')':3001/health$(NC)'
+	@echo ''
+	@echo '$(BLUE)Windows Port Forward (run in PowerShell as admin):$(NC)'
+	@echo '  netsh interface portproxy add v4tov4 listenport=3001 listenaddress=0.0.0.0 connectport=3001 connectaddress='$$(hostname -I | awk '{print $$1}')''
+	@echo ''
+	@echo '$(BLUE)Then access via:$(NC) $(YELLOW)http://localhost:3001/dashboard$(NC)'
+	@echo ''
+	@echo '$(BLUE)For more info:$(NC) see WSL_SETUP.md'
+
 ## setup: First-time setup (install + up + db-init)
 setup: install up db-init
 	@echo ''

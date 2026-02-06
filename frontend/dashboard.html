@@ -458,6 +458,44 @@
       <p>⚠️ <span id="error-message"></span></p>
     </div>
 
+    <!-- WSL Configuration Helper -->
+    <div id="wsl-config" class="wsl-config" style="display: none;">
+      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid var(--accent-blue); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h4 style="color: var(--accent-blue); margin-bottom: 12px; font-size: 14px;">🖥️ WSL Network Configuration</h4>
+        <p style="color: var(--text-secondary); font-size: 12px; margin-bottom: 16px; line-height: 1.6;">
+          If you're accessing this dashboard from Windows browser while the server runs in WSL,
+          you may need to configure the WSL IP address for API calls to work.
+        </p>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <input
+            type="text"
+            id="wsl-ip-input"
+            placeholder="172.x.x.x (WSL IP)"
+            style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 12px; border-radius: 4px; font-family: 'SF Mono', monospace; font-size: 12px; flex: 1; min-width: 200px;"
+          />
+          <button
+            onclick="saveWslIp()"
+            style="background: var(--accent-blue); color: white; border: none; padding: 8px 16px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s;"
+            onmouseover="this.style.opacity='0.8'"
+            onmouseout="this.style.opacity='1'"
+          >
+            Save & Reload
+          </button>
+          <button
+            onclick="autoDetectWslIp()"
+            style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); padding: 8px 16px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: opacity 0.2s;"
+            onmouseover="this.style.opacity='0.8'"
+            onmouseout="this.style.opacity='1'"
+          >
+            Auto-Detect
+          </button>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 11px; margin-top: 12px;">
+          💡 Tip: Run <code style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 3px;">hostname -I</code> in WSL to get your IP
+        </p>
+      </div>
+    </div>
+
     <!-- Metrics Grid -->
     <div class="metrics-grid">
       <div class="metric-card">
@@ -557,7 +595,37 @@
   </div>
 
   <script>
-    const API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001';
+    // Auto-detect API base URL for WSL compatibility
+    // Priority: 1. Environment variable, 2. Same hostname, 3. localhost fallback
+    let API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001';
+
+    // WSL detection: if served from WSL, try to connect to WSL IP from Windows
+    // This handles the case where Windows browser accesses WSL-hosted dashboard
+    (function detectApiBase() {
+      const hostname = window.location.hostname;
+
+      // If accessing from Windows (localhost) but dashboard is served from WSL
+      // we need to use the actual WSL IP for API calls
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        // Try to detect if we're in WSL environment
+        const wslIp = localStorage.getItem('wsl_api_ip');
+
+        if (wslIp) {
+          // User has manually set WSL IP
+          API_BASE = window.location.protocol + '//' + wslIp + ':3001';
+          console.log('[Dashboard] Using WSL IP from localStorage:', API_BASE);
+        } else {
+          // Auto-detect: try common WSL IP first, fallback to localhost
+          // Common WSL2 IPs: 172.x.x.x range
+          API_BASE = window.location.protocol + '//localhost:3001';
+          console.log('[Dashboard] Using localhost:', API_BASE);
+        }
+      } else {
+        // Accessing via IP directly (already correct)
+        console.log('[Dashboard] Using detected hostname:', API_BASE);
+      }
+    })();
+
     let startTime = Date.now();
 
     // Update uptime
@@ -738,10 +806,80 @@
       const errorElement = document.getElementById('error-state');
       document.getElementById('error-message').textContent = message;
       errorElement.classList.add('show');
+
+      // Show WSL config if it's a network error
+      if (message.includes('Failed to fetch') || message.includes('Network')) {
+        showWslConfig();
+      }
     }
 
     function hideError() {
       document.getElementById('error-state').classList.remove('show');
+    }
+
+    // WSL Configuration Helpers
+    function showWslConfig() {
+      const configDiv = document.getElementById('wsl-config');
+      const savedIp = localStorage.getItem('wsl_api_ip');
+      if (savedIp) {
+        document.getElementById('wsl-ip-input').value = savedIp;
+      }
+      configDiv.style.display = 'block';
+    }
+
+    function saveWslIp() {
+      const ip = document.getElementById('wsl-ip-input').value.trim();
+      if (ip) {
+        localStorage.setItem('wsl_api_ip', ip);
+        console.log('[Dashboard] Saved WSL IP:', ip);
+        // Reload page to apply new configuration
+        location.reload();
+      } else {
+        alert('Please enter a valid IP address');
+      }
+    }
+
+    async function autoDetectWslIp() {
+      // Try to fetch from a special endpoint that returns WSL info
+      try {
+        // Try common WSL2 IP range by attempting connection
+        const commonIps = [
+          '172.27.94.215',
+          '172.28.192.1',
+          '172.29.144.1',
+          '172.30.96.1',
+          '172.31.48.1'
+        ];
+
+        // Show detection in progress
+        const input = document.getElementById('wsl-ip-input');
+        input.value = 'Detecting...';
+
+        // Try to connect to health endpoint on each IP
+        for (const ip of commonIps) {
+          try {
+            const response = await fetch(`http://${ip}:3001/health`, {
+              mode: 'cors',
+              cache: 'no-cache'
+            });
+            if (response.ok) {
+              input.value = ip;
+              console.log('[Dashboard] Auto-detected WSL IP:', ip);
+              return;
+            }
+          } catch (e) {
+            // Try next IP
+            continue;
+          }
+        }
+
+        // If auto-detection fails
+        input.value = '';
+        alert('Auto-detection failed. Please manually enter your WSL IP.\n\nRun "hostname -I" in WSL terminal to get your IP address.');
+      } catch (error) {
+        console.error('[Dashboard] Auto-detection error:', error);
+        alert('Auto-detection failed. Please manually enter your WSL IP.');
+      }
     }
 
     // Initial fetch

@@ -90,11 +90,27 @@ const ERC20_BYTECODE = '0x608060405234801561001057600080fd5b50610121806100206000
 
 /**
  * Test accounts (Anvil default)
- * Private keys must be exactly 32 bytes (64 hex chars + 0x prefix)
+ * Private keys MUST be exactly 32 bytes (64 hex chars + 0x prefix)
+ *
+ * Official Anvil default keys from: https://book.getfoundry.sh/reference/anvil/anvil-accounts
  */
-const ACCOUNT_1 = privateKeyToAccount('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
-const ACCOUNT_2 = privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
-const ACCOUNT_3 = privateKeyToAccount('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a');
+const ANVIL_PKS = [
+  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // Account #0 - 64 chars
+  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d', // Account #1 - 64 chars
+  '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a1', // Account #2 - 64 chars (FIXED!)
+] as const;
+
+// Verify all keys are 64 hex characters (excluding 0x prefix)
+ANVIL_PKS.forEach((pk, i) => {
+  const hexChars = pk.slice(2);
+  if (hexChars.length !== 64) {
+    throw new Error(`Private key ${i} has invalid length: ${hexChars.length} chars (expected 64)`);
+  }
+});
+
+const ACCOUNT_1 = privateKeyToAccount(ANVIL_PKS[0]);
+const ACCOUNT_2 = privateKeyToAccount(ANVIL_PKS[1]);
+const ACCOUNT_3 = privateKeyToAccount(ANVIL_PKS[2]);
 
 describe('ERC20 Transfer Event Integration Demo', () => {
   let publicClient: ReturnType<typeof createPublicClient>;

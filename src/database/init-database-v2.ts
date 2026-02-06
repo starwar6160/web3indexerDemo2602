@@ -81,18 +81,15 @@ export async function initDatabaseV2(): Promise<void> {
     try {
       await db.schema
         .createTable('sync_status')
-        .addColumn('chain_id', 'integer', (col) => col.primaryKey())
-        .addColumn('last_block', 'bigint', (col) => col.notNull())
-        .addColumn('last_synced_at', 'timestamptz', (col) =>
-          col.notNull().defaultTo(sql`now()`)
-        )
-        .addColumn('sync_status', 'varchar(20)', (col) =>
-          col.notNull().defaultTo('syncing')
-        ) // 'syncing', 'caught_up', 'error'
-        .addColumn('error_message', 'text') // 默认可为空
-        .addColumn('updated_at', 'timestamptz', (col) =>
-          col.notNull().defaultTo(sql`now()`)
-        )
+        .addColumn('id', 'serial', (col) => col.primaryKey())
+        .addColumn('processor_name', 'varchar(255)', (col) => col.notNull().unique())
+        .addColumn('last_processed_block', 'bigint', (col) => col.notNull())
+        .addColumn('last_processed_hash', 'varchar(66)')
+        .addColumn('target_block', 'bigint')
+        .addColumn('synced_percent', sql`decimal(5,2)`) // 0.00 - 100.00
+        .addColumn('status', 'varchar(20)', (col) => col.notNull().defaultTo('active'))
+        .addColumn('error_message', 'text')
+        .addColumn('updated_at', 'timestamptz', (col) => col.notNull().defaultTo(sql`now()`))
         .execute();
 
       console.log('[INIT V2] ✅ Sync status table created');
@@ -109,9 +106,20 @@ export async function initDatabaseV2(): Promise<void> {
       await db.schema
         .createIndex('idx_sync_status')
         .on('sync_status')
-        .column('chain_id')
+        .column('processor_name')
         .execute();
       console.log('[INIT V2] ✅ Index idx_sync_status created');
+    } catch (error) {
+      // 索引可能已存在
+    }
+
+    try {
+      await db.schema
+        .createIndex('idx_sync_status_status')
+        .on('sync_status')
+        .column('status')
+        .execute();
+      console.log('[INIT V2] ✅ Index idx_sync_status_status created');
     } catch (error) {
       // 索引可能已存在
     }

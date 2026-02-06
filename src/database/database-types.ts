@@ -3,6 +3,7 @@ import { ColumnType, Generated, Insertable, Selectable, Updateable } from 'kysel
 export interface Database {
   blocks: BlockTable;
   transactions: TransactionTable; // Phase 3: Event data storage
+  transaction_logs: TransactionLogTable;
   sync_checkpoints: CheckpointTable;
   sync_status: SyncStatusTable; // Phase 3: Detailed progress tracking
   app_locks: AppLockTable;
@@ -54,6 +55,21 @@ export interface TransactionTable {
 export type Transaction = Selectable<TransactionTable>;
 export type NewTransaction = Insertable<TransactionTable>;
 export type TransactionUpdate = Updateable<TransactionTable>;
+
+export interface TransactionLogTable {
+  id: Generated<number>;
+  log_index: number;
+  transaction_hash: string;
+  block_number: ColumnType<string, string, string>; // NUMERIC(78,0) returned as string
+  address: string;
+  topics: string[];
+  data: string;
+  created_at: ColumnType<Date, string | undefined, Date>;
+}
+
+export type TransactionLog = Selectable<TransactionLogTable>;
+export type NewTransactionLog = Insertable<TransactionLogTable>;
+export type TransactionLogUpdate = Updateable<TransactionLogTable>;
 
 // Phase 3: Sync status table for detailed progress tracking
 export interface SyncStatusTable {

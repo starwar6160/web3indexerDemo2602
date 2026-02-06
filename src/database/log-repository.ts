@@ -36,7 +36,7 @@ export class LogRepository {
         data TEXT NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
-        UNIQUE(log_index, transaction_hash)
+        UNIQUE(block_number, log_index)
       );
 
       CREATE INDEX IF NOT EXISTS idx_transaction_logs_block_number ON transaction_logs(block_number);
@@ -74,7 +74,7 @@ export class LogRepository {
       )
       .onConflict((oc: any) =>
         oc
-          .column(['log_index', 'transaction_hash'])
+          .column(['block_number', 'log_index'])
           .doNothing()
       )
       .execute();
@@ -91,7 +91,7 @@ export class LogRepository {
       .orderBy('log_index', 'asc')
       .execute();
 
-    return result.map(row => ({
+    return result.map((row: any) => ({
       log_index: row.log_index,
       transaction_hash: row.transaction_hash,
       block_number: BigInt(row.block_number),

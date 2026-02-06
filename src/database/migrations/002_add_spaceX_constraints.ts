@@ -128,7 +128,7 @@ export async function up(): Promise<void> {
     await sql`
       ALTER TABLE transaction_logs
       ADD CONSTRAINT transaction_logs_tx_log_unique
-      UNIQUE (transaction_hash, log_index);
+      UNIQUE (block_number, log_index);
     `.execute(db);
 
     await sql`

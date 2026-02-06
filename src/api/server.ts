@@ -177,7 +177,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
           latestIndexedBlock: localMaxBlock?.toString() ?? null,
           lastSyncedAt: latestBlock?.created_at ?? null,
           lag: lag?.toString() ?? null,
-          syncPercentage,
+          syncPercentage: syncPercentage?.toString() ?? '0',
           synced: lag !== null && lag <= 5,
         },
         metrics: {
@@ -252,10 +252,10 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
       res.json({
         data: formatted,
         meta: {
-          total: totalCount?.count || 0,
-          page,
-          limit,
-          totalPages,
+          total: Number(totalCount?.count || 0),
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Number(totalPages),
           hasNext: page < totalPages,
           hasPrev: page > 1,
         },
@@ -308,7 +308,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         from_address: t.from_address,
         to_address: t.to_address,
         amount: t.amount,
-        contract_address: t.contract_address,
+        token_address: t.token_address,
         created_at: t.created_at,
       }));
 
@@ -316,7 +316,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         data: formatted,
         meta: {
           count: formatted.length,
-          contractFilter: contractAddress || null,
+          tokenFilter: contractAddress || null,
         },
       });
     } catch (error) {
@@ -389,7 +389,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
             from_address: t.from_address,
             to_address: t.to_address,
             amount: t.amount,
-            contract_address: t.contract_address,
+            token_address: t.token_address,
           })),
           transferCount: transfers.length,
         },

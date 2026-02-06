@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createApiServer } from '@/api/server';
+import { createDbConnection, closeDbConnection } from '@/database/database-config';
 
 /**
  * API Data Safety Test
@@ -14,9 +15,14 @@ import { createApiServer } from '@/api/server';
 describe('API BigInt Safety', () => {
   let app: ReturnType<typeof createApiServer>['app'];
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    await createDbConnection();
     const server = createApiServer({ port: 3002 });
     app = server.app;
+  });
+
+  afterAll(async () => {
+    await closeDbConnection();
   });
 
   describe('GET /api/status', () => {
@@ -138,9 +144,14 @@ describe('API BigInt Safety', () => {
 describe('API Error Handling', () => {
   let app: ReturnType<typeof createApiServer>['app'];
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    await createDbConnection();
     const server = createApiServer({ port: 3003 });
     app = server.app;
+  });
+
+  afterAll(async () => {
+    await closeDbConnection();
   });
 
   it('should return 400 for invalid pagination parameters', async () => {

@@ -26,10 +26,14 @@ node_modules/
 
 # Block test data and logs
 *.log
-*.json
 *.backup
 *.sh
 *.bat
+
+artifacts/**/*.json
+data/**/*.json
+runtime/**/*.json
+
 
 # Block git
 .git/

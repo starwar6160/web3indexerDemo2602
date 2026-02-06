@@ -22,7 +22,12 @@ export const BlockSchema = z.object({
     .startsWith('0x', 'Parent hash must start with 0x')
     .length(66, 'Parent hash must be 66 characters')
     .regex(/^0x[a-f0-9]{64}$/, 'Parent hash must contain only hexadecimal characters')
-    .refine(hash => hash !== '0x0000000000000000000000000000000000000000000000000000000000000000', {
+    .refine(hash => {
+      // Allow zero hash for genesis blocks (block 0 or 1)
+      return hash === '0x0000000000000000000000000000000000000000000000000000000000000000'
+        ? true  // Genesis block
+        : hash !== '0x0000000000000000000000000000000000000000000000000000000000000000'; // Non-zero for others
+    }, {
       message: 'Parent hash cannot be zero address (except for genesis block)',
     })
     .optional(), // Genesis block may not have parent hash

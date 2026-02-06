@@ -124,14 +124,20 @@ curl http://localhost:3001/health
 # {"status":"ok","timestamp":"..."}
 ```
 
-### 检查仪表板
+### 检查仪表板 ✅ 已修复
 在浏览器打开：`http://localhost:3001/dashboard`
 
-应该看到：
+**应该看到**：
 - ⚡ Web3 Indexer 标题
 - 实时同步状态（绿色/黄色/红色指示灯）
 - Network Tip, Indexed Height, Sync Lag 等指标
 - Recent Blocks 和 Recent Transfers 表格
+
+**修复验证**（2026-02-06）：
+- ✅ 修复了 "Cannot GET /dashboard/" 错误
+- ✅ 使用专用路由替代静态中间件
+- ✅ 仪表板现在可以正常访问
+- ✅ 所有 API 端点正常工作（BigInt 安全）
 
 ---
 

@@ -239,7 +239,18 @@ export class BlockRepository {
       .select(sql`count(*)`.as('count'))
       .executeTakeFirst();
 
-    return result?.count as number ?? 0;
+    const count = result?.count;
+    if (count === null || count === undefined) {
+      return 0;
+    }
+    // PostgreSQL may return string for very large counts
+    if (typeof count === 'string') {
+      return parseInt(count, 10);
+    }
+    if (typeof count === 'bigint') {
+      return Number(count);
+    }
+    return count as number;
   }
 
   async existsByNumber(number: bigint): Promise<boolean> {

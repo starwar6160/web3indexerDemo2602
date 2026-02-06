@@ -53,10 +53,10 @@ describe('Reorg Handling Integration Test', () => {
     // Verify initial chain
     const initialCount = await db
       .selectFrom('blocks')
-      .select(sql<number>`count(*)`.as('count'))
+      .select(sql`count(*)`.as('count'))
       .executeTakeFirst();
     
-    expect(initialCount?.count).toBeGreaterThanOrEqual(10);
+    expect(Number(initialCount?.count)).toBeGreaterThanOrEqual(10);
     console.log('✅ Initial chain inserted');
 
     // Step 2: Simulate reorg detection

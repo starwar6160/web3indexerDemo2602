@@ -3,11 +3,12 @@
  * Tests performance under load and failure scenarios
  */
 
-import { createDbConnection, closeDbConnection } from '../database/database-config';
-import { BlockRepository } from '../database/block-repository';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createDbConnection, closeDbConnection } from '@/database/database-config';
+import { BlockRepository } from '@/database/block-repository';
 import { createPublicClient, http } from 'viem';
-import { retryWithBackoff } from '../utils/retry';
-import { TokenBucketRateLimiter } from '../utils/rate-limiter';
+import { retryWithBackoff } from '@/utils/retry';
+import { TokenBucketRateLimiter } from '@/utils/rate-limiter';
 
 const TEST_RPC_URL = process.env.TEST_RPC_URL || 'http://localhost:8545';
 
@@ -309,9 +310,71 @@ async function runStressTests() {
   }
 }
 
-// Run tests if this file is executed directly
-if (require.main === module) {
-  runStressTests();
-}
+describe('Stress Tests', () => {
+  beforeAll(async () => {
+    await createDbConnection();
+  });
 
-export { runStressTests };
+  afterAll(async () => {
+    await closeDbConnection();
+  });
+
+  it('should handle consecutive RPC failures', async () => {
+    console.log('\n=== Test 1: Consecutive RPC Failures ===');
+
+    const client = createPublicClient({
+      chain: null,
+      transport: http('http://localhost:8545'), // Non-existent RPC
+    });
+
+    let callCount = 0;
+    const failedCalls = [];
+
+    for (let i = 0; i < 5; i++) {
+      try {
+        callCount++;
+        await client.getBlockNumber();
+        console.log(`Call ${callCount} succeeded unexpectedly`);
+      } catch (error) {
+        failedCalls.push(error);
+        console.log(`Call ${callCount} failed as expected: ${error.message}`);
+      }
+    }
+
+    expect(callCount).toBe(5);
+    expect(failedCalls.length).toBe(5);
+    console.log('✅ All RPC calls failed as expected');
+  });
+
+  it('should handle rate limiting', async () => {
+    console.log('\n=== Test 2: Rate Limiting ===');
+
+    const limiter = new TokenBucketRateLimiter({
+      tokensPerInterval: 5,
+      intervalMs: 1000,
+      maxBurstTokens: 10,
+    });
+
+    let allowedCount = 0;
+    const promises = [];
+
+    for (let i = 0; i < 5; i++) {
+      promises.push(
+        (async () => {
+          const allowed = limiter.tryConsume().allowed;
+          if (allowed) {
+            allowedCount++;
+            console.log(`Request ${i + 1} allowed`);
+          } else {
+            console.log(`Request ${i + 1} rate limited`);
+          }
+        })()
+      );
+    }
+
+    await Promise.all(promises);
+    expect(allowedCount).toBeGreaterThan(0);
+    expect(allowedCount).toBeLessThanOrEqual(5);
+    console.log(`✅ Rate limiting completed, ${allowedCount} requests allowed`);
+  });
+});

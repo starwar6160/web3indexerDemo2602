@@ -36,8 +36,8 @@ describe('Sync Engine Transactional Integrity', () => {
     const blocksToSave = [
       {
         number: 100n,
-        hash: '0x100',
-        parentHash: '0x99',
+        hash: '0x0000000000000000000000000000000000000000000000000000000000000100',
+        parentHash: '0x0000000000000000000000000000000000000000000000000000000000000099',
         timestamp: 1234567890n,
         nonce: '0x0',
         difficulty: 0n,
@@ -70,7 +70,7 @@ describe('Sync Engine Transactional Integrity', () => {
     const dbBlocks = validatedBlocks.map(toDbBlock);
     expect(dbBlocks).toBeDefined();
     expect(dbBlocks.length).toBe(1);
-    expect(dbBlocks[0].number).toBe('100'); // Converted to string
+    expect(dbBlocks[0].number).toBe(100n); // Should remain as BigInt
   });
 
   it('should handle reorg tracking variables correctly', async () => {

@@ -7,6 +7,7 @@ export interface Database {
   sync_checkpoints: CheckpointTable;
   sync_status: SyncStatusTable; // Phase 3: Detailed progress tracking
   app_locks: AppLockTable;
+  migrations: MigrationTable; // Phase 4: Migration version tracking
 }
 
 export interface BlockTable {
@@ -99,3 +100,18 @@ export interface AppLockTable {
 export type AppLock = Selectable<AppLockTable>;
 export type NewAppLock = Insertable<AppLockTable>;
 export type AppLockUpdate = Updateable<AppLockTable>;
+
+// Phase 4: Migration version tracking for automatic runner
+export interface MigrationTable {
+  id: Generated<number>;
+  version: string; // e.g., "001", "002"
+  name: string; // e.g., "fix_critical_issues"
+  applied_at: ColumnType<Date, Date | undefined, Date>; // Allow Date for insert
+  checksum: string | null; // optional: file hash for integrity
+  execution_time_ms: number | null;
+  success: boolean;
+}
+
+export type Migration = Selectable<MigrationTable>;
+export type NewMigration = Insertable<MigrationTable>;
+export type MigrationUpdate = Updateable<MigrationTable>;

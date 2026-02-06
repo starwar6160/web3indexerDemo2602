@@ -202,21 +202,87 @@ export function validateBlocksStrict(
 /**
  * Type assertion helper - like C++ static_cast with runtime check
  * Throws if type doesn't match expectation
+ *
+ * ✅ C++风格：严格的类型转换（Strict Type Casting）
+ * - 拒绝 null/undefined
+ * - 拒绝科学计数法字符串（除非在安全范围内）
+ * - 给出明确的错误信息
  */
 export function assertBigInt(
   value: unknown,
   context?: string
 ): bigint {
+  // ✅ SpaceX哲学：当场炸，拒绝无效值
+  if (value === null || value === undefined) {
+    throw new TypeError(
+      `${context || 'assertBigInt'}: value is ${value}, expected bigint. ` +
+      `Null/undefined values are not allowed.`
+    );
+  }
+
+  // 已经是bigint，直接返回
   if (typeof value === 'bigint') {
     return value;
   }
 
-  const bigintValue = BigInt(value as string | number);
+  // 处理number类型
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError(
+        `${context || 'assertBigInt'}: number ${value} is not a safe integer`
+      );
+    }
+    const result = BigInt(value);
+    console.warn(
+      `[Type Coercion] ${context ? `in ${context}` : ''}: ` +
+      `Expected bigint, got number. Converted ${value} -> ${result}`
+    );
+    return result;
+  }
 
-  console.warn(
-    `[Type Coercion] ${context ? `in ${context}` : ''}: ` +
-    `Expected bigint, got ${typeof value}. Converted ${value} -> ${bigintValue}`
+  // 处理字符串类型
+  if (typeof value === 'string') {
+    // 检查空字符串
+    if (value.trim() === '') {
+      throw new TypeError(
+        `${context || 'assertBigInt'}: string is empty, cannot convert to bigint`
+      );
+    }
+
+    // 检查科学计数法
+    if (value.includes('e') || value.includes('E')) {
+      const asNumber = Number(value);
+      if (!Number.isSafeInteger(asNumber)) {
+        throw new TypeError(
+          `${context || 'assertBigInt'}: string "${value}" in scientific notation ` +
+          `exceeds safe integer range when converted`
+        );
+      }
+      const result = BigInt(asNumber);
+      console.warn(
+        `[Type Coercion] ${context ? `in ${context}` : ''}: ` +
+        `Expected bigint, got scientific notation string. Converted "${value}" -> ${result}`
+      );
+      return result;
+    }
+
+    // 普通字符串
+    try {
+      const result = BigInt(value);
+      console.warn(
+        `[Type Coercion] ${context ? `in ${context}` : ''}: ` +
+        `Expected bigint, got string. Converted "${value}" -> ${result}`
+      );
+      return result;
+    } catch (error) {
+      throw new TypeError(
+        `${context || 'assertBigInt'}: cannot convert string "${value}" to bigint: ${error}`
+      );
+    }
+  }
+
+  // 不支持的类型
+  throw new TypeError(
+    `${context || 'assertBigInt'}: unsupported type ${typeof value}, value: ${value}`
   );
-
-  return bigintValue;
 }

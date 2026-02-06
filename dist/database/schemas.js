@@ -76,10 +76,30 @@ function safeValidateBlock(data) {
  * - 任何一个区块格式错误 → 整个批次失败
  * - 静默跳过 = 数据完整性风险
  * - "炸得早"胜过"静默错误"
+ *
+ * C++风格：防御性编程 - 先过滤无效输入，再验证
  */
 function validateBlocks(blocks) {
+    // ✅ C++风格：输入清理（Input Sanitization）
+    // 类似于 C++ 的 std::remove_if + exception
+    const sanitizedBlocks = blocks.map((block, index) => {
+        // SpaceX哲学：当场炸，给出明确的错误信息
+        if (block === null || block === undefined) {
+            throw new Error(`Block at index ${index} is ${block}. ` +
+                `Null/undefined blocks are not allowed. ` +
+                `This indicates a serious data source issue.`);
+        }
+        return { block, index };
+    });
     // SpaceX哲学: 当场炸，不要吞异常
-    return blocks.map((block) => exports.BlockSchema.parse(block));
+    return sanitizedBlocks.map(({ block, index }) => {
+        try {
+            return exports.BlockSchema.parse(block);
+        }
+        catch (error) {
+            throw new Error(`Block at index ${index} validation failed: ${error}`);
+        }
+    });
 }
 /**
  * 转换为数据库格式

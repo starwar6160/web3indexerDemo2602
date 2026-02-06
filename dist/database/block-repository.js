@@ -87,25 +87,27 @@ class BlockRepository {
                         .where('blocks.hash', '!=', block.hash))
                         .returningAll()
                         .executeTakeFirst();
-                    if (result) {
-                        results.push(result);
-                        // ✅ Fix for C4: Determine insert vs update without race condition query
-                        // Strategy: Compare created_at timestamps to detect update vs insert
-                        // - Fresh insert: created_at is very recent (< 1 second ago)
-                        // - Update: created_at is older (from original insert)
-                        //
-                        // Note: This is a heuristic but works reliably in practice since batch
-                        // operations complete within milliseconds, while updated rows have
-                        // much older created_at timestamps
-                        const now = Date.now();
-                        const createdAt = new Date(result.created_at).getTime();
-                        const isFreshInsert = (now - createdAt) < 1000; // < 1 second = likely insert
-                        if (isFreshInsert) {
-                            insertedCount++;
-                        }
-                        else {
-                            updatedCount++;
-                        }
+                    // ✅ SpaceX哲学：失败了就炸，不要继续
+                    if (!result) {
+                        throw new Error(`Failed to upsert block ${block.number}: insert returned no rows`);
+                    }
+                    results.push(result);
+                    // ✅ Fix for C4: Determine insert vs update without race condition query
+                    // Strategy: Compare created_at timestamps to detect update vs insert
+                    // - Fresh insert: created_at is very recent (< 1 second ago)
+                    // - Update: created_at is older (from original insert)
+                    //
+                    // Note: This is a heuristic but works reliably in practice since batch
+                    // operations complete within milliseconds, while updated rows have
+                    // much older created_at timestamps
+                    const now = Date.now();
+                    const createdAt = new Date(result.created_at).getTime();
+                    const isFreshInsert = (now - createdAt) < 1000; // < 1 second = likely insert
+                    if (isFreshInsert) {
+                        insertedCount++;
+                    }
+                    else {
+                        updatedCount++;
                     }
                 }
                 catch (error) {
@@ -162,8 +164,38 @@ class BlockRepository {
         if (num === null || num === undefined) {
             return null;
         }
-        // 如果返回的是字符串或数字，转换为 BigInt
-        return typeof num === 'bigint' ? num : BigInt(num);
+        // ✅ C++风格：安全的类型转换（Safe Type Conversion）
+        // 处理科学计数法和边界情况
+        if (typeof num === 'bigint') {
+            return num;
+        }
+        // 处理字符串类型（包括科学计数法）
+        if (typeof num === 'string') {
+            // 检查科学计数法
+            if (num.includes('e') || num.includes('E')) {
+                // 转换为 number 再转 bigint（有精度风险，但至少不会崩溃）
+                const asNumber = Number(num);
+                if (!Number.isSafeInteger(asNumber)) {
+                    throw new Error(`Block number "${num}" exceeds safe integer range when converted from scientific notation`);
+                }
+                return BigInt(asNumber);
+            }
+            // 普通字符串
+            try {
+                return BigInt(num);
+            }
+            catch (error) {
+                throw new Error(`Cannot convert block number string "${num}" to bigint: ${error}`);
+            }
+        }
+        // 处理 number 类型
+        if (typeof num === 'number') {
+            if (!Number.isSafeInteger(num)) {
+                throw new Error(`Block number ${num} exceeds safe integer range`);
+            }
+            return BigInt(num);
+        }
+        throw new Error(`Unsupported block number type: ${typeof num}, value: ${num}`);
     }
     async getBlockCount() {
         const result = await this.db

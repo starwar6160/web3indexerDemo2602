@@ -21,7 +21,7 @@ interface Metrics {
     uptime: number;
     memory: NodeJS.MemoryUsage;
     blockCount: number;
-    localMax: string;
+    localMax: string | null;
     chainMax: string;
     syncLag: number;
     syncStatus: 'up_to_date' | 'behind' | 'critical';
@@ -243,7 +243,7 @@ async function getMetrics(rpcClient: ReturnType<typeof createPublicClient>): Pro
       uptime: process.uptime(),
       memory: process.memoryUsage(),
       blockCount,
-      localMax: localMax?.toString() ?? 'null',
+      localMax: localMax?.toString() ?? null,
       chainMax: chainMax.toString(),
       syncLag: lag,
       syncStatus: lag <= 10 ? 'up_to_date' : lag <= 100 ? 'behind' : 'critical',

@@ -7,17 +7,21 @@ import { sql } from 'kysely';
 import pLimit from 'p-limit';
 
 /**
- * ERC20 Transfer Event ABI
- * Phase 3: Event parsing - Transfer(address indexed from, address indexed to, uint256 value)
+ * SimpleBank Transfer Event ABI
+ * Phase 3: Event parsing - Transfer(address indexed from, address indexed to, uint256 amount, uint256 timestamp)
+ * 
+ * NOTE: SimpleBank's Transfer event has 4 parameters including timestamp,
+ * unlike standard ERC20 which only has 3 parameters (from, to, value).
  */
-const erc20TransferAbi = [
+const simpleBankTransferAbi = [
   {
     type: 'event',
     name: 'Transfer',
     inputs: [
       { name: 'from', type: 'address', indexed: true },
       { name: 'to', type: 'address', indexed: true },
-      { name: 'value', type: 'uint256', indexed: false },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'timestamp', type: 'uint256', indexed: false },
     ],
     anonymous: false,
   },
@@ -118,14 +122,14 @@ export class SyncEngine {
     try {
       const logs = await this.client.getLogs({
         address: this.config.tokenContract,
-        event: erc20TransferAbi[0],
+        event: simpleBankTransferAbi[0],
         fromBlock,
         toBlock,
       });
 
       return logs.map((log) => {
         const decoded = decodeEventLog({
-          abi: erc20TransferAbi,
+          abi: simpleBankTransferAbi,
           data: log.data,
           topics: log.topics,
         });
@@ -136,8 +140,8 @@ export class SyncEngine {
           log_index: log.logIndex,
           from_address: String(decoded.args?.from || '0x0'),
           to_address: String(decoded.args?.to || '0x0'),
-          amount: String(decoded.args?.value || '0'),
-          token_address: this.config.tokenContract!,
+          amount: String(decoded.args?.amount || '0'),
+          contract_address: this.config.tokenContract!,
         };
       });
     } catch (error) {

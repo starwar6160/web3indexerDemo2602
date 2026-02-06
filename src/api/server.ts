@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { sql } from 'kysely';
 import swaggerUi from 'swagger-ui-express';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { createDbConnection } from '../database/database-config';
 import { BlockRepository } from '../database/block-repository';
 import { TransfersRepository } from '../database/transfers-repository';
@@ -125,9 +126,6 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   }
   app.use(bigIntSafeJsonMiddleware());
   app.use(express.json());
-
-  // Static files for frontend dashboard
-  app.use('/dashboard', express.static(path.join(__dirname, '../../frontend')));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -458,6 +456,22 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
     } catch (error) {
       logger.error({ error }, 'Failed to generate metrics');
       res.status(500).json({ error: 'Failed to generate metrics' });
+    }
+  });
+
+  /**
+   * GET /dashboard
+   * Production Monitor Dashboard
+   */
+  app.get('/dashboard', (req: Request, res: Response) => {
+    try {
+      const dashboardPath = path.join(__dirname, '../../frontend/dashboard.html');
+      const html = readFileSync(dashboardPath, 'utf-8');
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error) {
+      logger.error({ error }, 'Failed to load dashboard');
+      res.status(500).json({ error: 'Failed to load dashboard' });
     }
   });
 

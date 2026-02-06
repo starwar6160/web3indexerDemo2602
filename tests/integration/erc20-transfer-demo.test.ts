@@ -92,11 +92,11 @@ const ERC20_BYTECODE = '0x608060405234801561001057600080fd5b50610121806100206000
  * Test accounts (Anvil default)
  * Private keys must be exactly 32 bytes (64 hex chars + 0x prefix)
  */
-const PRIVATE_KEYS = [
+const PRIVATE_KEYS: `0x${string}`[] = [
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
   '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
   '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
-] as const;
+];
 
 const ACCOUNT_1 = privateKeyToAccount(PRIVATE_KEYS[0]);
 const ACCOUNT_2 = privateKeyToAccount(PRIVATE_KEYS[1]);

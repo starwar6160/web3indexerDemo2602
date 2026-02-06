@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index-production.js",
     "start:dev": "node dist/index-production.js",
+    "start:api": "node dist/api/server.js",
+    "start:api:dev": "ts-node src/api/server.ts",
     "dev": "ts-node src/index-production.ts",
     "dev:failfast": "ts-node src/index-failfast.ts",
     "dev:legacy": "ts-node src/index.ts",

@@ -79,6 +79,16 @@ dev:
 	@echo '$(BLUE)▶️  Starting indexer in development mode...$(NC)'
 	npm run start:dev
 
+## dev-full: Run both indexer AND API server (recommended for development)
+dev-full:
+	@echo '$(BLUE)🚀 Starting full development environment (Indexer + API)...$(NC)'
+	@echo '$(BLUE)Indexer running on:$(NC) $(YELLOW)Logs to console$(NC)'
+	@echo '$(BLUE)API Dashboard:$(NC) $(YELLOW)http://localhost:3001/dashboard$(NC)'
+	@echo ''
+	@make --no-print-directory dev & \
+	npm run start:api:dev & \
+	wait
+
 ## dev-watch: Run indexer with file watching
 dev-watch:
 	@echo '$(BLUE)👀 Starting indexer with file watching...$(NC)'

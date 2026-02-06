@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { sql } from 'kysely';
 import swaggerUi from 'swagger-ui-express';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { createDbConnection } from '../database/database-config';
 import { BlockRepository } from '../database/block-repository';
 import { TransfersRepository } from '../database/transfers-repository';
 import { SyncStatusRepository } from '../database/sync-status-repository';
@@ -14,9 +14,6 @@ import { getDb } from '../database/database-config';
 import logger from '../utils/logger';
 import { metrics } from '../utils/metrics-collector';
 import { swaggerSpec } from './swagger';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * BigInt-safe JSON serializer
@@ -130,7 +127,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   app.use(express.json());
 
   // Static files for frontend dashboard
-  app.use('/dashboard', express.static(path.join(__dirname, '../../frontend/dashboard.html')));
+  app.use('/dashboard', express.static(path.join(__dirname, '../../frontend')));
 
   // Rate limiting
   const limiter = rateLimit({
@@ -339,7 +336,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         from_address: t.from_address,
         to_address: t.to_address,
         amount: t.amount,
-        token_address: t.token_address,
+        token_address: 'token_address' in t ? t.token_address : (t as any).contract_address,
         created_at: t.created_at,
       }));
 
@@ -526,8 +523,13 @@ if (require.main === module) {
   const port = parseInt(process.env.API_PORT || '3001', 10);
   const rpcUrl = process.env.RPC_URL || 'http://localhost:58545';
 
-  startApiServer({ port, rpcUrl }).catch((err) => {
-    console.error('Failed to start API:', err);
-    process.exit(1);
-  });
+  // Initialize database first
+  createDbConnection()
+    .then(() => {
+      return startApiServer({ port, rpcUrl });
+    })
+    .catch((err) => {
+      console.error('Failed to start API:', err);
+      process.exit(1);
+    });
 }

@@ -62,6 +62,16 @@ down:
 ## restart: Restart development services
 restart: down up
 
+## kill: Kill all running indexer and API processes
+kill:
+	@echo '$(BLUE)🔪 Killing all processes...$(NC)'
+	@lsof -ti:3001 > /dev/null 2>&1 && (lsof -ti:3001 | xargs kill -9 2>/dev/null; echo '  $(YELLOW)Killed API process on port 3001$(NC)') || echo '  $(GREEN)No API process running$(NC)'
+	@pkill -f "ts-node src/index-enhanced" 2>/dev/null && echo '  $(YELLOW)Killed indexer process$(NC)' || echo '  $(GREEN)No indexer process running$(NC)'
+	@pkill -f "ts-node src/index-enhanced.ts" 2>/dev/null || true
+	@pkill -f "npm run start:api" 2>/dev/null || true
+	@pkill -f "npm run start:api:dev" 2>/dev/null || true
+	@echo '$(GREEN)✅ All processes killed$(NC)'
+
 ## db-init: Initialize database schema
 db-init:
 	@echo '$(BLUE)🗄️  Initializing database schema...$(NC)'
@@ -82,6 +92,10 @@ dev:
 ## dev-full: Run both indexer AND API server (recommended for development)
 dev-full:
 	@echo '$(BLUE)🚀 Starting full development environment (Indexer + API)...$(NC)'
+	@echo '$(BLUE)Step 0: Cleaning up old processes...$(NC)'
+	@lsof -ti:3001 > /dev/null 2>&1 && (lsof -ti:3001 | xargs kill -9 2>/dev/null; echo '  $(YELLOW)Killed old API process on port 3001$(NC)') || echo '  $(GREEN)No process on port 3001$(NC)'
+	@pkill -f "ts-node src/index-enhanced" 2>/dev/null && echo '  $(YELLOW)Killed old indexer process$(NC)' || echo '  $(GREEN)No indexer process running$(NC)'
+	@echo ''
 	@echo '$(BLUE)Indexer running on:$(NC) $(YELLOW)Logs to console$(NC)'
 	@echo '$(BLUE)API Dashboard:$(NC) $(YELLOW)http://localhost:3001/dashboard$(NC)'
 	@echo ''
@@ -92,6 +106,10 @@ dev-full:
 ## dev-with-demo: Deploy ERC20 demo data, then start indexer + API (one-click demo)
 dev-with-demo:
 	@echo '$(BLUE)🎨 Starting Web3 Indexer with ERC20 Demo Data...$(NC)'
+	@echo ''
+	@echo '$(BLUE)Step 0: Cleaning up old processes...$(NC)'
+	@lsof -ti:3001 > /dev/null 2>&1 && (lsof -ti:3001 | xargs kill -9 2>/dev/null; echo '  $(YELLOW)Killed old API process on port 3001$(NC)') || echo '  $(GREEN)No process on port 3001$(NC)'
+	@pkill -f "ts-node src/index-enhanced" 2>/dev/null && echo '  $(YELLOW)Killed old indexer process$(NC)' || echo '  $(GREEN)No indexer process running$(NC)'
 	@echo ''
 	@echo '$(BLUE)Step 1: Generating demo data...$(NC)'
 	npx ts-node scripts/auto-deploy-erc20-demo.ts

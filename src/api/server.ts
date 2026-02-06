@@ -4,12 +4,19 @@ import rateLimit from 'express-rate-limit';
 import { createPublicClient, http } from 'viem';
 import { z } from 'zod';
 import { sql } from 'kysely';
+import swaggerUi from 'swagger-ui-express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { BlockRepository } from '../database/block-repository';
 import { TransfersRepository } from '../database/transfers-repository';
 import { SyncStatusRepository } from '../database/sync-status-repository';
 import { getDb } from '../database/database-config';
 import logger from '../utils/logger';
 import { metrics } from '../utils/metrics-collector';
+import { swaggerSpec } from './swagger';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * BigInt-safe JSON serializer
@@ -122,6 +129,9 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   app.use(bigIntSafeJsonMiddleware());
   app.use(express.json());
 
+  // Static files for frontend dashboard
+  app.use('/dashboard', express.static(path.join(__dirname, '../../frontend/dashboard.html')));
+
   // Rate limiting
   const limiter = rateLimit({
     windowMs: finalConfig.rateLimitWindowMs,
@@ -140,6 +150,27 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   // RPC client for chain head
   const rpcClient = createPublicClient({
     transport: http(finalConfig.rpcUrl),
+  });
+
+  // Swagger API Documentation
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customSiteTitle: 'Web3 Indexer API Documentation',
+    customCss: '.swagger-ui .topbar { display: none }',
+    swaggerOptions: {
+      persistAuthorization: true,
+      displayRequestDuration: true,
+      docExpansion: 'none',
+      filter: true,
+      showRequestHeaders: true,
+    },
+  }));
+
+  /**
+   * GET /docs
+   * Redirect to API documentation
+   */
+  app.get('/docs', (req: Request, res: Response) => {
+    res.redirect('/docs/');
   });
 
   /**
@@ -408,6 +439,14 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  /**
+   * GET /
+   * Redirect to dashboard
+   */
+  app.get('/', (req: Request, res: Response) => {
+    res.redirect('/dashboard');
   });
 
   /**

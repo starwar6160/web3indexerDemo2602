@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web3 Indexer - Sync Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      color: #667eea;
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .status-card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: 600;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status-indicator.synced {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-indicator.synced::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #28a745;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 2s infinite;
+    }
+
+    .status-indicator.syncing {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-indicator.syncing::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #ffc107;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 1s infinite;
+    }
+
+    .status-indicator.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .status-indicator.error::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #dc3545;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+    }
+
+    .metric-card {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 20px;
+      border-left: 4px solid #667eea;
+    }
+
+    .metric-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .metric-unit {
+      font-size: 14px;
+      color: #999;
+      font-weight: 400;
+      margin-left: 4px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 24px;
+      background: #e9ecef;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 20px;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.5s ease;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 12px;
+    }
+
+    .progress-text {
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 1;
+    }
+
+    .last-update {
+      text-align: center;
+      color: #666;
+      font-size: 12px;
+      margin-top: 16px;
+    }
+
+    .error-message {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 16px;
+      display: none;
+    }
+
+    .error-message.show {
+      display: block;
+    }
+
+    .loading {
+      text-align: center;
+      color: #666;
+      padding: 40px;
+    }
+
+    .api-link {
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    .api-link a {
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .api-link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔗 Web3 Indexer Dashboard</h1>
+      <p>Real-time blockchain sync monitoring</p>
+    </div>
+
+    <div class="status-card">
+      <div class="status-header">
+        <h2>Sync Status</h2>
+        <div id="status-indicator" class="status-indicator syncing">Loading...</div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Latest Network Block</div>
+          <div class="metric-value" id="latest-network-block">-</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Latest Indexed Block</div>
+          <div class="metric-value" id="latest-indexed-block">-</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Sync Lag</div>
+          <div class="metric-value" id="sync-lag">-<span class="metric-unit">blocks</span></div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Sync Progress</div>
+          <div class="metric-value" id="sync-percentage">-<span class="metric-unit">%</span></div>
+        </div>
+      </div>
+
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        <div class="progress-text" id="progress-text">0%</div>
+      </div>
+
+      <div class="error-message" id="error-message"></div>
+
+      <div class="last-update">
+        Last updated: <span id="last-update-time">-</span>
+      </div>
+    </div>
+
+    <div class="api-link">
+      <a href="/docs" target="_blank">📚 View API Documentation</a>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.protocol + '//' + window.location.hostname + ':3001';
+
+    async function fetchStatus() {
+      try {
+        const response = await fetch(`${API_BASE}/api/status`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch status');
+        }
+
+        const data = await response.json();
+        updateDashboard(data);
+        hideError();
+      } catch (error) {
+        console.error('Error fetching status:', error);
+        showError(error.message);
+      }
+    }
+
+    function updateDashboard(data) {
+      // Update status indicator
+      const indicator = document.getElementById('status-indicator');
+      indicator.className = 'status-indicator ' + data.status;
+      indicator.textContent = data.status;
+
+      // Update metrics
+      document.getElementById('latest-network-block').textContent =
+        data.sync.latestNetworkBlock || '-';
+      document.getElementById('latest-indexed-block').textContent =
+        data.sync.latestIndexedBlock || '-';
+      document.getElementById('sync-lag').innerHTML =
+        (data.sync.lag !== null ? data.sync.lag : '-') + '<span class="metric-unit">blocks</span>';
+
+      const percentage = parseFloat(data.sync.syncPercentage) || 0;
+      document.getElementById('sync-percentage').innerHTML =
+        percentage.toFixed(2) + '<span class="metric-unit">%</span>';
+
+      // Update progress bar
+      const progressFill = document.getElementById('progress-fill');
+      const progressText = document.getElementById('progress-text');
+      const clampedPercentage = Math.min(100, Math.max(0, percentage));
+
+      progressFill.style.width = clampedPercentage + '%';
+      progressText.textContent = percentage.toFixed(2) + '%';
+
+      // Update timestamp
+      document.getElementById('last-update-time').textContent =
+        new Date(data.timestamp).toLocaleTimeString();
+    }
+
+    function showError(message) {
+      const errorElement = document.getElementById('error-message');
+      errorElement.textContent = 'Error: ' + message;
+      errorElement.classList.add('show');
+    }
+
+    function hideError() {
+      const errorElement = document.getElementById('error-message');
+      errorElement.classList.remove('show');
+    }
+
+    // Initial fetch
+    fetchStatus();
+
+    // Poll every 2 seconds
+    setInterval(fetchStatus, 2000);
+  </script>
+</body>
+</html>

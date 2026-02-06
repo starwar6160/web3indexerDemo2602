@@ -7,8 +7,9 @@ import { BlockRepository } from './database/block-repository';
 import { runMigrations } from './database/migration-runner';
 import logger, { logSamplers, generateTraceId, withTraceId } from './utils/logger';
 import { config } from './utils/config';
-import { setupGlobalErrorHandlers, setupGracefulShutdown } from './utils/error-handlers';
+import { setupGlobalErrorHandlers } from './utils/error-handlers';
 import { startHealthServer, recordRpcCall } from './utils/health-server';
+import { setupGracefulShutdown, registerShutdownHandler, isShuttingDown as checkIsShuttingDown } from './utils/graceful-shutdown';
 import { retryWithBackoffSelective } from './utils/retry';
 import { TokenBucketRateLimiter } from './utils/rate-limiter';
 import pLimit from 'p-limit';
@@ -26,7 +27,7 @@ const client = createPublicClient({
 let blockRepository: BlockRepository;
 // Global state with proper cleanup tracking
 let isRunning = true;
-let shutdownRequested = false;
+let healthServerInstance: ReturnType<typeof startHealthServer> | null = null;
 
 // Rate limiter: 10 requests per second with burst of 20
 const rateLimiter = new TokenBucketRateLimiter({
@@ -437,7 +438,7 @@ async function syncMissingBlocks(): Promise<void> {
       );
       let currentBlock = startBlock;
 
-      while (currentBlock <= latestBlock && isRunning && !shutdownRequested) {
+      while (currentBlock <= latestBlock && isRunning && !checkIsShuttingDown()) {
         // 使用三元表达式代替 Math.min
         const batchEnd =
           currentBlock + batchSize - 1n <= latestBlock
@@ -477,7 +478,7 @@ async function pollNewBlocks(): Promise<void> {
     'Starting real-time monitoring'
   );
 
-  while (isRunning && !shutdownRequested) {
+  while (isRunning && !checkIsShuttingDown()) {
     try {
       const currentBlock = await rpcCallWithMetrics(
         'pollBlockNumber',
@@ -539,7 +540,7 @@ async function main(): Promise<void> {
     logger.info('✅ Step 1: Global error handlers configured');
 
     // 启动健康检查服务器
-    const healthServer = await startHealthServer();
+    healthServerInstance = await startHealthServer();
     logger.info('✅ Step 2: Health server started');
 
     // 初始化数据库
@@ -562,30 +563,54 @@ async function main(): Promise<void> {
     await syncMissingBlocks();
     logger.info('✅ Step 5: Initial sync completed');
 
-    // 设置优雅关闭
-    setupGracefulShutdown(async () => {
-      logger.info('Shutting down gracefully...');
-      if (shutdownRequested) {
-        logger.warn('Shutdown already requested, skipping duplicate signal');
-        return;
-      }
-      shutdownRequested = true;
-      isRunning = false;
+    // 设置优雅关闭 - RAII风格
+    setupGracefulShutdown();
 
-      // 记录最终统计
-      const stats = await blockRepository.getBlockCoverageStats();
-      logger.info({
-        totalBlocks: stats.totalBlocks,
-        coverage: stats.coverage,
-      }, 'Final sync statistics before shutdown');
+    // 优先级1: 停止接受新请求
+    registerShutdownHandler({
+      name: 'Health Server',
+      priority: 1,
+      shutdown: async () => {
+        if (!healthServerInstance) {
+          logger.warn('Health server instance not found');
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          healthServerInstance!.close(() => {
+            logger.info('[SHUTDOWN] 🌐 Health server - No longer accepting requests');
+            resolve();
+          });
+        });
+      },
+    });
 
-      // 关闭健康检查服务器 (await for proper cleanup)
-      await new Promise<void>((resolve) => {
-        healthServer.close(() => resolve());
-      });
+    // 优先级5: 停止同步循环
+    registerShutdownHandler({
+      name: 'Sync Loop',
+      priority: 5,
+      shutdown: async () => {
+        isRunning = false;
+        logger.info('[SHUTDOWN] 🔄 Sync loop - Signaled to stop');
+        // Give in-flight operations time to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      },
+    });
 
-      await closeDbConnection();
-      logger.info('✅ Graceful shutdown complete');
+    // 优先级10: 清理数据库连接
+    registerShutdownHandler({
+      name: 'Database Pool',
+      priority: 10,
+      shutdown: async () => {
+        // 记录最终统计
+        const stats = await blockRepository.getBlockCoverageStats();
+        logger.info({
+          totalBlocks: stats.totalBlocks,
+          coverage: stats.coverage,
+        }, '[SHUTDOWN] 📊 Final sync statistics');
+
+        await closeDbConnection();
+        logger.info('[SHUTDOWN] 📦 Database pool - All connections drained');
+      },
     });
 
     // 开始实时监控

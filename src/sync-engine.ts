@@ -154,12 +154,11 @@ export class SyncEngine {
     console.log(`[SyncEngine] Syncing batch ${startBlock} to ${endBlock}`);
 
     // 🟣 Fix R4: Check batch size to prevent V8 heap exhaustion
-    // Problem: Very large batches (even with batchSize=100 limit) could cause memory issues
-    // Solution: Verify batch size is reasonable before allocating arrays
-    const batchLength = Number(endBlock - startBlock + 1n);
-    if (batchLength > 1000) {
+    // CRITICAL FIX: Use BigInt comparison to avoid 2^53 precision loss
+    const batchRange = endBlock - startBlock + 1n;
+    if (batchRange > 1000n) {
       throw new Error(
-        `Batch size ${batchLength} exceeds safe limit of 1000 blocks. ` +
+        `Batch size ${batchRange.toString()} exceeds safe limit of 1000 blocks. ` +
         `This could cause V8 heap exhaustion. ` +
         `Please reduce batchSize or sync in smaller chunks.`
       );
@@ -311,22 +310,22 @@ export class SyncEngine {
       );
     }
 
-    const dbBlocks = validatedBlocks.map(toDbBlock);
-
-    // Phase 3.5: Fetch Transfer events (atomic with block sync)
-    let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
-    if (this.config.tokenContract) {
-      console.log(`[SyncEngine] Fetching Transfer events for batch...`);
-      transfers = await this.getTransferEvents(startBlock, endBlock);
-      console.log(`[SyncEngine] Fetched ${transfers.length} Transfer events`);
-    }
-
+    // Phase 3.5: Fetch Transfer events (INSIDE transaction for true atomicity)
     // Phase 4: Atomic database write in transaction (C3 fix) - BLOCKS + TRANSFERS
     let insertedCount = 0;
     let updatedCount = 0;
+    let transfersSaved = 0;
 
     await this.blockRepository.db.transaction().execute(async (trx) => {
-      // 4a. Save blocks
+      // 4a. Fetch events INSIDE transaction - fail fast if RPC unavailable
+      let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
+      if (this.config.tokenContract) {
+        console.log(`[SyncEngine] Fetching Transfer events for batch (inside transaction)...`);
+        transfers = await this.getTransferEvents(startBlock, endBlock);
+        console.log(`[SyncEngine] Fetched ${transfers.length} Transfer events`);
+      }
+
+      // 4b. Save blocks
       for (const block of dbBlocks) {
         const now = new Date().toISOString();
 
@@ -363,10 +362,10 @@ export class SyncEngine {
         }
       }
 
-      // 4b. Save transfers atomically (cascade delete via FK)
+      // 4c. Save transfers atomically (cascade delete via FK)
       if (transfers.length > 0) {
-        await this.transfersRepository.saveWithTrx(trx, transfers);
-        console.log(`[SyncEngine] ✅ Saved ${transfers.length} Transfer events in same transaction`);
+        transfersSaved = await this.transfersRepository.saveWithTrx(trx, transfers);
+        console.log(`[SyncEngine] ✅ Saved ${transfersSaved} Transfer events in same transaction`);
       }
     });
 
@@ -388,25 +387,40 @@ export class SyncEngine {
 
   /**
    * Handle reorg by deleting conflicting blocks AND cascade delete transfers
-   * CRITICAL: FK constraint with ON DELETE CASCADE handles transfers automatically
+   * CRITICAL: Wrapped in transaction for atomicity - crash mid-reorg won't leave orphans
    */
   private async handleReorg(blockNumber: bigint, newParentHash: string): Promise<void> {
     console.warn(`[SyncEngine] Handling reorg at block ${blockNumber}`);
 
-    // CASCADE DELETE: blocks FK has ON DELETE CASCADE -> transfers auto-deleted
-    const deletedBlocks = await this.blockRepository.deleteBlocksAfter(blockNumber - 1n);
-    console.warn(`[SyncEngine] Deleted ${deletedBlocks} blocks due to reorg (transfers cascade deleted)`);
+    await this.blockRepository.db.transaction().execute(async (trx) => {
+      // 1. Delete blocks within transaction
+      const deleteResult = await trx
+        .deleteFrom('blocks')
+        .where('number', '>', blockNumber - 1n)
+        .execute();
+      const deletedBlocks = deleteResult.length;
 
-    // Verify cascade delete worked
-    if (this.config.tokenContract) {
-      const remainingTransfers = await this.transfersRepository.countByBlock(blockNumber);
-      if (remainingTransfers > 0) {
-        throw new Error(
-          `Cascade delete failed: ${remainingTransfers} transfers still exist at block ${blockNumber}. ` +
-          `Database inconsistency detected.`
-        );
+      console.warn(`[SyncEngine] Deleted ${deletedBlocks} blocks due to reorg`);
+
+      // 2. Verify cascade delete worked within same transaction
+      if (this.config.tokenContract) {
+        const remainingTransfers = await trx
+          .selectFrom('transfers')
+          .select('block_number')
+          .where('block_number', '>', blockNumber - 1n)
+          .limit(1)
+          .executeTakeFirst();
+
+        if (remainingTransfers) {
+          throw new Error(
+            `Cascade delete failed: transfers still exist after block ${blockNumber}. ` +
+            `Database inconsistency detected.`
+          );
+        }
       }
-    }
+    });
+
+    console.warn(`[SyncEngine] ✅ Reorg handled atomically - all orphans deleted`);
   }
 
   /**

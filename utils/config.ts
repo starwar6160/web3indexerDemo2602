@@ -14,15 +14,15 @@ const EnvSchema = z.object({
   RPC_URL: z.string().url('RPC_URL must be a valid HTTP URL').default('http://localhost:8545'),
 
   // 性能配置
-  POLL_INTERVAL_MS: z.string().transform(Number).pipe(
+  POLL_INTERVAL_MS: z.string().min(1, 'POLL_INTERVAL_MS cannot be empty').transform(Number).pipe(
     z.number().int().positive().max(60000) // 最大60秒
   ).default('2000'),
 
-  DB_SYNC_BATCH_SIZE: z.string().transform(Number).pipe(
+  DB_SYNC_BATCH_SIZE: z.string().min(1, 'DB_SYNC_BATCH_SIZE cannot be empty').transform(Number).pipe(
     z.number().int().positive().max(100) // 最大100个区块
   ).default('10'),
 
-  MAX_RETRIES: z.string().transform(Number).pipe(
+  MAX_RETRIES: z.string().min(1, 'MAX_RETRIES cannot be empty').transform(Number).pipe(
     z.number().int().positive().max(10)
   ).default('3'),
 
@@ -31,7 +31,7 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
   // 健康检查配置
-  HEALTH_CHECK_PORT: z.string().transform(Number).pipe(
+  HEALTH_CHECK_PORT: z.string().min(1, 'HEALTH_CHECK_PORT cannot be empty').transform(Number).pipe(
     z.number().int().positive().max(65535)
   ).default('3000'),
 });

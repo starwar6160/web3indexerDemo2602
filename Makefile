@@ -77,7 +77,7 @@ db-migrate:
 ## dev: Run indexer in development mode (with hot reload)
 dev:
 	@echo '$(BLUE)▶️  Starting indexer in development mode...$(NC)'
-	npm run start:dev
+	npx ts-node --transpile-only src/index-enhanced.ts
 
 ## dev-full: Run both indexer AND API server (recommended for development)
 dev-full:

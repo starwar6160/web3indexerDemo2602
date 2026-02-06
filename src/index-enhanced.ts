@@ -1,9 +1,13 @@
+import { config } from 'dotenv';
 import { createDbConnection, closeDbConnection } from './database/database-config';
 import { CheckpointRepository } from './database/checkpoint-repository';
 import { SyncEngine } from './sync-engine';
 import { DistributedLock, AppLock } from './database/distributed-lock';
 import { initLockTable } from './database/init-lock-table';
 import { randomUUID } from 'crypto';
+
+// Load environment variables
+config();
 
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5000'); // 5 seconds

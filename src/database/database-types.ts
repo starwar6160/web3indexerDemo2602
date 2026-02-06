@@ -2,12 +2,13 @@ import { ColumnType, Generated, Insertable, Selectable, Updateable } from 'kysel
 
 export interface Database {
   blocks: BlockTable;
-  transactions: TransactionTable; // Phase 3: Event data storage
+  transactions: TransactionTable;
   transaction_logs: TransactionLogTable;
+  transfers: TransfersTable; // ERC20 Transfer events
   sync_checkpoints: CheckpointTable;
-  sync_status: SyncStatusTable; // Phase 3: Detailed progress tracking
+  sync_status: SyncStatusTable;
   app_locks: AppLockTable;
-  migrations: MigrationTable; // Phase 4: Migration version tracking
+  migrations: MigrationTable;
 }
 
 export interface BlockTable {
@@ -71,6 +72,23 @@ export interface TransactionLogTable {
 export type TransactionLog = Selectable<TransactionLogTable>;
 export type NewTransactionLog = Insertable<TransactionLogTable>;
 export type TransactionLogUpdate = Updateable<TransactionLogTable>;
+
+// ERC20 Transfer events table
+export interface TransfersTable {
+  id: Generated<number>;
+  block_number: ColumnType<bigint, bigint, bigint>;
+  transaction_hash: string;
+  log_index: number;
+  from_address: string;
+  to_address: string;
+  amount: ColumnType<string, string, string>; // DECIMAL(78,18)
+  contract_address: string;
+  created_at: ColumnType<Date, string | undefined, Date>;
+}
+
+export type Transfer = Selectable<TransfersTable>;
+export type NewTransfer = Insertable<TransfersTable>;
+export type TransferUpdate = Updateable<TransfersTable>;
 
 // Phase 3: Sync status table for detailed progress tracking
 export interface SyncStatusTable {

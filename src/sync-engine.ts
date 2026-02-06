@@ -1,11 +1,27 @@
-import { createPublicClient, http, Block, Log } from 'viem';
+import { createPublicClient, http, Block, Log, decodeEventLog, type Address } from 'viem';
 import { BlockRepository } from './database/block-repository';
 import { LogRepository, TransactionLog } from './database/log-repository';
+import { TransfersRepository, type Transfer } from './database/transfers-repository';
 import { validateBlocks, toDbBlock, ValidatedBlock } from './database/schemas';
 import { sql } from 'kysely';
 import pLimit from 'p-limit';
 
-type PublicClient = ReturnType<typeof createPublicClient>;
+/**
+ * ERC20 Transfer Event ABI
+ * Phase 3: Event parsing - Transfer(address indexed from, address indexed to, uint256 value)
+ */
+const erc20TransferAbi = [
+  {
+    type: 'event',
+    name: 'Transfer',
+    inputs: [
+      { name: 'from', type: 'address', indexed: true },
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'value', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
+] as const;
 
 /**
  * Configuration for the sync engine
@@ -19,6 +35,7 @@ export interface SyncEngineConfig {
   concurrency?: number; // P1 Fix: Parallel block fetching concurrency
   rpcTimeout?: number; // P4 Fix: RPC request timeout in ms
   fetchLogs?: boolean; // P3 Fix: Fetch transaction logs atomically
+  tokenContract?: Address; // ERC20 contract to monitor
 }
 
 /**
@@ -39,14 +56,15 @@ export interface BatchSyncResult {
  * - C1: All-or-nothing batch sync with retry queue
  * - C2: ParentHash chain validation within batches
  * - C3: Transaction boundary - validation before write
+ * - P3: Atomic block + Transfer event sync in single transaction
  */
 export class SyncEngine {
-  private client: PublicClient;
-  private clients: PublicClient[] = []; // P4 Fix: RPC pool for load balancing
+  private client: ReturnType<typeof createPublicClient>;
+  private clients: ReturnType<typeof createPublicClient>[] = [];
   private blockRepository: BlockRepository;
-  private logRepository: LogRepository; // P3 Fix: Log repository
+  private transfersRepository: TransfersRepository; // P3: Transfer events
   private config: SyncEngineConfig;
-  private currentRpcIndex = 0; // Round-robin index
+  private currentRpcIndex = 0;
 
   constructor(config: SyncEngineConfig) {
     // 🟡 Fix A2: Validate batchSize boundaries
@@ -62,7 +80,7 @@ export class SyncEngine {
 
     this.config = config;
     this.blockRepository = new BlockRepository();
-    this.logRepository = new LogRepository(); // P3 Fix
+    this.transfersRepository = new TransfersRepository(); // P3: Transfer events
 
     // P4 Fix: Support multiple RPC URLs with round-robin
     const rpcUrls = Array.isArray(config.rpcUrl) ? config.rpcUrl : [config.rpcUrl];
@@ -92,6 +110,42 @@ export class SyncEngine {
    * @param expectedParentHash Expected parent hash for startBlock (for validation)
    * @returns Last block hash for next batch validation
    */
+  private async getTransferEvents(fromBlock: bigint, toBlock: bigint): Promise<Omit<Transfer, 'id' | 'created_at'>[]> {
+    if (!this.config.tokenContract) {
+      return [];
+    }
+
+    try {
+      const logs = await this.client.getLogs({
+        address: this.config.tokenContract,
+        event: erc20TransferAbi[0],
+        fromBlock,
+        toBlock,
+      });
+
+      return logs.map((log) => {
+        const decoded = decodeEventLog({
+          abi: erc20TransferAbi,
+          data: log.data,
+          topics: log.topics,
+        });
+
+        return {
+          block_number: log.blockNumber,
+          transaction_hash: log.transactionHash,
+          log_index: log.logIndex,
+          from_address: String(decoded.args?.from || '0x0'),
+          to_address: String(decoded.args?.to || '0x0'),
+          amount: String(decoded.args?.value || '0'),
+          contract_address: this.config.tokenContract!,
+        };
+      });
+    } catch (error) {
+      console.error('[SyncEngine] Failed to fetch Transfer events:', error);
+      throw new Error(`Event fetch failed: ${error}`);
+    }
+  }
+
   async syncBatch(
     startBlock: bigint,
     endBlock: bigint,
@@ -259,11 +313,20 @@ export class SyncEngine {
 
     const dbBlocks = validatedBlocks.map(toDbBlock);
 
-    // Phase 4: Atomic database write in transaction (C3 fix)
+    // Phase 3.5: Fetch Transfer events (atomic with block sync)
+    let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
+    if (this.config.tokenContract) {
+      console.log(`[SyncEngine] Fetching Transfer events for batch...`);
+      transfers = await this.getTransferEvents(startBlock, endBlock);
+      console.log(`[SyncEngine] Fetched ${transfers.length} Transfer events`);
+    }
+
+    // Phase 4: Atomic database write in transaction (C3 fix) - BLOCKS + TRANSFERS
     let insertedCount = 0;
     let updatedCount = 0;
 
     await this.blockRepository.db.transaction().execute(async (trx) => {
+      // 4a. Save blocks
       for (const block of dbBlocks) {
         const now = new Date().toISOString();
 
@@ -288,7 +351,6 @@ export class SyncEngine {
           .executeTakeFirst();
 
         if (result) {
-          // Determine insert vs update
           const dateNow = Date.now();
           const createdAt = new Date(result.created_at).getTime();
           const isFreshInsert = (dateNow - createdAt) < 1000;
@@ -299,6 +361,12 @@ export class SyncEngine {
             updatedCount++;
           }
         }
+      }
+
+      // 4b. Save transfers atomically (cascade delete via FK)
+      if (transfers.length > 0) {
+        await this.transfersRepository.saveWithTrx(trx, transfers);
+        console.log(`[SyncEngine] ✅ Saved ${transfers.length} Transfer events in same transaction`);
       }
     });
 
@@ -319,15 +387,26 @@ export class SyncEngine {
   }
 
   /**
-   * Handle reorg by deleting conflicting blocks and resetting sync point
+   * Handle reorg by deleting conflicting blocks AND cascade delete transfers
+   * CRITICAL: FK constraint with ON DELETE CASCADE handles transfers automatically
    */
   private async handleReorg(blockNumber: bigint, newParentHash: string): Promise<void> {
     console.warn(`[SyncEngine] Handling reorg at block ${blockNumber}`);
 
-    // Delete all blocks after the reorg point
-    const deletedCount = await this.blockRepository.deleteBlocksAfter(blockNumber - 1n);
+    // CASCADE DELETE: blocks FK has ON DELETE CASCADE -> transfers auto-deleted
+    const deletedBlocks = await this.blockRepository.deleteBlocksAfter(blockNumber - 1n);
+    console.warn(`[SyncEngine] Deleted ${deletedBlocks} blocks due to reorg (transfers cascade deleted)`);
 
-    console.warn(`[SyncEngine] Deleted ${deletedCount} blocks due to reorg`);
+    // Verify cascade delete worked
+    if (this.config.tokenContract) {
+      const remainingTransfers = await this.transfersRepository.countByBlock(blockNumber);
+      if (remainingTransfers > 0) {
+        throw new Error(
+          `Cascade delete failed: ${remainingTransfers} transfers still exist at block ${blockNumber}. ` +
+          `Database inconsistency detected.`
+        );
+      }
+    }
   }
 
   /**

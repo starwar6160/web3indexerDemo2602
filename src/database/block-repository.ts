@@ -169,6 +169,18 @@ export class BlockRepository {
       .executeTakeFirst();
   }
 
+  /**
+   * Find block by ID with FOR UPDATE lock (for transaction safety during reorg detection)
+   */
+  async findByIdForUpdate(number: bigint): Promise<Block | undefined> {
+    return await this.db
+      .selectFrom('blocks')
+      .where('number', '=', number)
+      .selectAll()
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   async findByHash(hash: string): Promise<Block | undefined> {
     return await this.db
       .selectFrom('blocks')

@@ -50,7 +50,7 @@ describe('BigInt Type Safety', () => {
       
       // Incorrect: Would lose precision
       const batchRangeAsNumber = Number(batchRange);
-      expect(batchRangeAsNumber).not.toBe(Number(batchRange)); // Precision lost!
+      expect(batchRangeAsNumber).not.toBe(batchRange); // Precision lost!
     });
   });
 

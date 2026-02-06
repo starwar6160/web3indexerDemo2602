@@ -123,11 +123,13 @@ export async function detectReorg(
       message: `Reorg detected at block ${newBlockNumber}, depth: ${reorgDepth}`,
     };
   } catch (error) {
-    logger.error({ error }, 'Error detecting reorg');
-    return {
-      detected: false,
-      message: `Error detecting reorg: ${error}`,
-    };
+    // P1 Fix: Don't mask reorg detection errors as "not detected"
+    // This could cause dirty data to be written during actual reorgs
+    logger.error({ error }, 'Error detecting reorg - propagating error');
+    throw new Error(
+      `Reorg detection failed: ${error instanceof Error ? error.message : String(error)}. ` +
+      `Cannot safely continue without reorg detection. Stopping to prevent dirty data.`
+    );
   }
 }
 
@@ -143,7 +145,11 @@ async function findCommonAncestor(
   let currentNumber = forkBlock - 1n;
   const maxDepth = 1000; // Safety limit
   let iterations = 0;
-  const visitedHashes = new Set<string>(); // 🟣 Fix R3: Detect circular references
+  // P0 Fix: Limit Set size to prevent memory leak on extreme reorgs
+  const VISITED_HASHES_MAX_SIZE = 100;
+  const visitedHashes = new Set<string>();
+  // Cache for batch fetching - P0 Fix N+1 problem
+  const blockCache = new Map<string, {hash: string; parent_hash: string} | null>();
 
   while (iterations < maxDepth && currentNumber >= 0n) {
     // 🟣 Fix R3: Detect circular references to prevent infinite loops
@@ -161,6 +167,14 @@ async function findCommonAncestor(
         `Manual intervention required.`
       );
     }
+
+    // P0 Fix: Limit Set size to prevent memory leak on extreme reorgs (1000+ depth)
+    if (visitedHashes.size >= VISITED_HASHES_MAX_SIZE) {
+      // Remove oldest entries (FIFO) - simple LRU by clearing half
+      const entries = Array.from(visitedHashes).slice(0, VISITED_HASHES_MAX_SIZE / 2);
+      visitedHashes.clear();
+      entries.forEach(h => visitedHashes.add(h));
+    }
     visitedHashes.add(currentHash);
 
     // Check if this block exists in our database
@@ -176,7 +190,20 @@ async function findCommonAncestor(
     }
 
     // Move to parent
-    const newBlock = await blockRepository.findByHash(currentHash);
+    // P0 Fix: Use cache to prevent N+1 query problem
+    let newBlock = blockCache.get(currentHash);
+    if (newBlock === undefined) {
+      const fetchedBlock = await blockRepository.findByHash(currentHash);
+      newBlock = fetchedBlock || null;
+      blockCache.set(currentHash, newBlock);
+      // Limit cache size to prevent memory leak
+      if (blockCache.size > 100) {
+        const firstKey = blockCache.keys().next().value;
+        if (firstKey !== undefined) {
+          blockCache.delete(firstKey);
+        }
+      }
+    }
     if (!newBlock) {
       logger.warn(
         { blockNumber: currentNumber.toString(), hash: currentHash },
@@ -197,7 +224,46 @@ async function findCommonAncestor(
 /**
  * Verify chain continuity before saving blocks
  * Throws error if parent block is missing (except for genesis)
+ * 
+ * P1 Fix: Added LRU cache to prevent N+1 queries during batch sync
+ * Same parent hash queried repeatedly for each block in batch
  */
+
+// P1 Fix: Simple LRU cache for parent block lookups
+type ParentBlock = {number: bigint; hash: string} | null;
+const parentHashCache = new Map<string, {block: ParentBlock; timestamp: number}>();
+const PARENT_CACHE_MAX_SIZE = 100;
+const PARENT_CACHE_TTL_MS = 60000; // 1 minute TTL
+
+async function getCachedParentBlock(
+  blockRepository: BlockRepository,
+  parentHash: string
+): Promise<ParentBlock> {
+  const now = Date.now();
+  const cached = parentHashCache.get(parentHash);
+
+  // Return cached if not expired
+  if (cached && (now - cached.timestamp) < PARENT_CACHE_TTL_MS) {
+    return cached.block;
+  }
+
+  // Fetch from DB
+  const parentBlock = await blockRepository.findByHash(parentHash);
+  const result: ParentBlock = parentBlock ?? null;
+
+  // Update cache
+  parentHashCache.set(parentHash, {block: result, timestamp: now});
+
+  // Evict oldest if over limit
+  if (parentHashCache.size > PARENT_CACHE_MAX_SIZE) {
+    const firstKey = parentHashCache.keys().next().value;
+    if (firstKey !== undefined) {
+      parentHashCache.delete(firstKey);
+    }
+  }
+
+  return result;
+}
 export async function verifyChainContinuity(
   blockRepository: BlockRepository,
   blockNumber: bigint,
@@ -208,7 +274,8 @@ export async function verifyChainContinuity(
     return;
   }
 
-  const parentBlock = await blockRepository.findByHash(parentHash);
+  // P1 Fix: Use cached lookup to prevent N+1 queries during batch sync
+  const parentBlock = await getCachedParentBlock(blockRepository, parentHash);
 
   if (!parentBlock) {
     throw new Error(
@@ -267,7 +334,16 @@ export async function handleReorg(
       'Reorg handling: rolled back blocks'
     );
 
-    // Call custom handler
+    // P0 Fix: Skip callback if no blocks were actually deleted (not a real reorg)
+    if (deletedCount === 0) {
+      logger.warn(
+        { commonAncestor: commonAncestor.toString() },
+        'No blocks deleted, reorg depth is 0 - skipping handler'
+      );
+      return deletedCount;
+    }
+
+    // Call custom handler only for actual reorgs
     await opts.onReorgDetected(deletedCount, commonAncestor);
 
     return deletedCount;

@@ -65,8 +65,18 @@ restart: down up
 ## kill: Kill all running indexer and API processes
 kill:
 	@echo '$(BLUE)🔪 Killing all processes...$(NC)'
-	@lsof -ti:3001 > /dev/null 2>&1 && (lsof -ti:3001 | xargs kill -9 2>/dev/null; echo '  $(YELLOW)Killed API process on port 3001$(NC)') || echo '  $(GREEN)No API process running$(NC)'
-	@pgrep -f "ts-node src/index-enhanced" > /dev/null 2>&1 && (pkill -9 -f "ts-node src/index-enhanced"; echo '  $(YELLOW)Killed indexer process$(NC)') || echo '  $(GREEN)No indexer process running$(NC)'
+	@if lsof -ti:3001 > /dev/null 2>&1; then \
+		lsof -ti:3001 | xargs kill -9 2>/dev/null; \
+		echo '  $(YELLOW)Killed API process on port 3001$(NC)'; \
+	else \
+		echo '  $(GREEN)No API process running$(NC)'; \
+	fi
+	@if pgrep -f "ts-node src/index-enhanced" > /dev/null 2>&1; then \
+		pkill -9 -f "ts-node src/index-enhanced"; \
+		echo '  $(YELLOW)Killed indexer process$(NC)'; \
+	else \
+		echo '  $(GREEN)No indexer process running$(NC)'; \
+	fi
 	@echo '$(GREEN)✅ All processes killed$(NC)'
 
 ## db-init: Initialize database schema
@@ -190,7 +200,7 @@ doctor:
 	@echo '$(BLUE)Checking port availability...$(NC)'
 	@lsof -i :5432 > /dev/null 2>&1 && echo '  $(GREEN)✅ PostgreSQL on port 5432$(NC)' || echo '  $(YELLOW)⚠️  Port 5432 (PostgreSQL) not in use$(NC)'
 	@lsof -i :8545 > /dev/null 2>&1 && echo '  $(GREEN)✅ RPC on port 8545$(NC)' || echo '  $(YELLOW)⚠️  Port 8545 (RPC) not in use$(NC)'
-	@lsof:3011 > /dev/null 2>&1 && echo '  $(GREEN)✅ API on port 3001$(NC)' || echo '  $(YELLOW)⚠️  Port 3001 (API) not in use$(NC)'
+	@lsof -i :3001 > /dev/null 2>&1 && echo '  $(GREEN)✅ API on port 3001$(NC)' || echo '  $(YELLOW)⚠️  Port 3001 (API) not in use$(NC)'
 	@echo ''
 	@echo '$(BLUE)Checking Docker services...$(NC)'
 	@docker-compose ps > /dev/null 2>&1 && echo '  $(GREEN)✅ Docker services running$(NC)' || echo '  $(YELLOW)⚠️  Docker services not running$(NC)'

@@ -2,6 +2,7 @@ import { createPublicClient, http, Block, BlockNumber } from 'viem';
 import { createDbConnection, getDb, closeDbConnection } from './database/database-config';
 import { BlockRepository } from './database/block-repository';
 import { validateBlock, toDbBlock } from './database/schemas';
+import { setupGlobalErrorHandlers } from './utils/error-handlers';
 
 const ANVIL_RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '2000'); // 2 seconds
@@ -160,6 +161,9 @@ async function pollNewBlocks(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // 设置全局错误处理器 - Fail Fast 模式
+  setupGlobalErrorHandlers();
+
   console.log(`[${new Date().toISOString()}] 🚀 Starting Web3 block number indexer with database sync...`);
   console.log(`[${new Date().toISOString()}] RPC URL: ${ANVIL_RPC_URL}`);
   console.log(`[${new Date().toISOString()}] Poll interval: ${POLL_INTERVAL}ms`);

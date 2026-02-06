@@ -133,3 +133,96 @@ export function validateDbOutput(data: unknown) {
 }
 
 export type ValidatedBlock = z.infer<typeof StrictBlockSchema>;
+
+/**
+ * Transaction Log 验证 Schema - Fail Fast 版本
+ * 用于验证从 RPC 获取的日志数据
+ */
+export const TransactionLogSchema = z.object({
+  logIndex: z.number().int().nonnegative(),
+  transactionIndex: z.number().int().nonnegative(),
+  transactionHash: z.string()
+    .length(66)
+    .startsWith('0x')
+    .regex(/^0x[a-f0-9]+$/, 'Transaction hash must contain only hexadecimal characters'),
+  blockHash: z.string()
+    .length(66)
+    .startsWith('0x')
+    .regex(/^0x[a-f0-9]+$/, 'Block hash must contain only hexadecimal characters'),
+  blockNumber: z.bigint().nonnegative(),
+  address: z.string()
+    .length(42)
+    .startsWith('0x')
+    .regex(/^0x[a-f0-9]+$/, 'Address must contain only hexadecimal characters'),
+  data: z.string().startsWith('0x'),
+  topics: z.array(z.string().startsWith('0x')).max(4, 'Maximum 4 topics allowed'),
+});
+
+/**
+ * 严格的日志验证 - 使用 .parse() 强制验证
+ * @param data - 从 RPC 获取的原始日志数据
+ * @param source - 数据来源（用于日志追踪）
+ * @throws ZodError 如果数据无效
+ */
+export function strictValidateLog(data: unknown, source: string = 'unknown') {
+  try {
+    return TransactionLogSchema.parse(data);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      logger.error({
+        source,
+        errors: error.errors,
+        data: JSON.stringify(data).slice(0, 500),
+      }, '❌ Log validation failed - data corrupted from RPC');
+    }
+    throw error;
+  }
+}
+
+/**
+ * 批量验证日志数据
+ * 只要有一个日志无效，整个批次都拒绝
+ */
+export function strictValidateLogs(logs: unknown[], source: string = 'batch'): ValidatedLog[] {
+  logger.debug({ count: logs.length, source }, 'Validating log batch');
+
+  const validatedLogs: ValidatedLog[] = [];
+  const errors: Array<{ index: number; error: z.ZodError }> = [];
+
+  logs.forEach((log, index) => {
+    try {
+      validatedLogs.push(strictValidateLog(log, `${source}[${index}]`));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        errors.push({ index, error });
+      } else {
+        throw error;
+      }
+    }
+  });
+
+  if (errors.length > 0) {
+    logger.error({
+      totalErrors: errors.length,
+      totalLogs: logs.length,
+      errors: errors.map(e => ({
+        index: e.index,
+        issues: e.error.errors.map(err => ({
+          path: err.path.join('.'),
+          message: err.message,
+        })),
+      })),
+    }, '❌ Log batch validation failed - rejecting entire batch');
+
+    throw new Error(`Log batch validation failed: ${errors.length}/${logs.length} logs are invalid`);
+  }
+
+  logger.info({
+    inputCount: logs.length,
+    validatedCount: validatedLogs.length,
+  }, '✅ All logs validated successfully');
+
+  return validatedLogs;
+}
+
+export type ValidatedLog = z.infer<typeof TransactionLogSchema>;

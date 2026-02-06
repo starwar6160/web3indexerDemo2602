@@ -768,14 +768,19 @@
     // Fetch recent transfers
     async function fetchTransfers() {
       try {
+        console.log('🔍 [API] Fetching transfers from:', `${API_BASE}/api/transfers?limit=10`);
         const response = await fetch(`${API_BASE}/api/transfers?limit=10`);
         if (!response.ok) throw new Error('Failed to fetch transfers');
 
         const data = await response.json();
+        console.log('📊 [API] Transfers response:', {
+          count: data.data?.length || 0,
+          data: data.data
+        });
         updateTransfersTable(data.data || []);
         document.getElementById('transfers-count').textContent = `${data.data?.length || 0} events`;
       } catch (error) {
-        console.error('Error fetching transfers:', error);
+        console.error('❌ [API] Error fetching transfers:', error);
       }
     }
 

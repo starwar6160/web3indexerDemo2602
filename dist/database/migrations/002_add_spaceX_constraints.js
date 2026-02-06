@@ -100,6 +100,7 @@ async function up() {
       WHERE table_name = 'transaction_logs'
     );
   `.execute(db);
+    // @ts-ignore - Kysely sql template type limitation
     if (tableExists.rows[0]?.exists) {
         await (0, kysely_1.sql) `
       ALTER TABLE transaction_logs DROP CONSTRAINT IF EXISTS transaction_logs_tx_log_unique;

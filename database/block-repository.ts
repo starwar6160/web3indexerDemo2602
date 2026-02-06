@@ -250,13 +250,13 @@ export class BlockRepository {
    * in case of extreme reorg depth or incorrect blockNumber
    */
   async deleteBlocksAfter(blockNumber: bigint): Promise<number> {
-    const MAX_REORG_DEPTH = 1000; // Maximum allowed reorg depth
+    const MAX_REORG_DEPTH = 1000n; // ✅ C++风格：使用bigint避免精度丢失
 
     // Check current max block before deletion
     const currentMax = await this.getMaxBlockNumber();
 
     if (currentMax && currentMax > blockNumber) {
-      const depth = Number(currentMax - blockNumber);
+      const depth = currentMax - blockNumber;  // ✅ 保持bigint运算
 
       if (depth > MAX_REORG_DEPTH) {
         throw new Error(
@@ -301,15 +301,16 @@ export class BlockRepository {
     }
 
     // SQL query to find gaps by identifying sequential breaks
+    // ✅ C++风格：使用 bigint 避免精度丢失
     const result = await this.db
       .selectFrom('blocks as b1')
       .select([
-        sql<number>`b1.number + 1`.as('gap_start'),
-        sql<number>`(
+        sql<bigint>`b1.number + 1`.as('gap_start'),  // ✅ bigint类型
+        sql<bigint>`(
           SELECT MIN(b2.number)
           FROM blocks b2
           WHERE b2.number > b1.number
-        ) - 1`.as('gap_end')
+        ) - 1`.as('gap_end')  // ✅ bigint类型
       ])
       .where('b1.number', '<', maxBlock)
       .where(sql<boolean>`NOT EXISTS (
@@ -317,12 +318,12 @@ export class BlockRepository {
       )`)
       .execute();
 
-    // Filter and convert to bigint
+    // Filter and convert to bigint (now they're already bigint)
     return result
       .filter(row => row.gap_start !== null && row.gap_end !== null && row.gap_start <= row.gap_end)
       .map(row => ({
-        start: BigInt(row.gap_start),
-        end: BigInt(row.gap_end)
+        start: row.gap_start,  // ✅ 已经是bigint
+        end: row.gap_end       // ✅ 已经是bigint
       }));
   }
 
@@ -347,9 +348,18 @@ export class BlockRepository {
       };
     }
 
-    const expectedBlocks = Number(maxBlock) + 1; // Block 0 to maxBlock
-    const missingBlocks = expectedBlocks - totalBlocks;
-    const coverage = totalBlocks > 0 ? (totalBlocks / expectedBlocks) * 100 : 0;
+    // ✅ C++风格：保持 bigint 运算直到最后才转换
+    const expectedBlocksBigInt = maxBlock + 1n;  // Block 0 to maxBlock
+    const missingBlocksBigInt = expectedBlocksBigInt - BigInt(totalBlocks);
+
+    // 只在返回时转换为 number（用于显示）
+    const expectedBlocks = Number(expectedBlocksBigInt);
+    const missingBlocks = Number(missingBlocksBigInt);
+
+    // 使用 bigint 计算覆盖率，避免精度丢失
+    const coverage = totalBlocks > 0
+      ? Number((BigInt(totalBlocks) * 100n) / expectedBlocksBigInt)
+      : 0;
 
     return {
       totalBlocks,

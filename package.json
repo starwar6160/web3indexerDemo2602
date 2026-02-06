@@ -2,42 +2,30 @@
   "name": "web3-indexer-demo",
   "version": "1.0.0",
   "description": "Web3 backend indexer demo with Anvil and PostgreSQL",
-
   "main": "dist/index.js",
-
   "scripts": {
     "build": "tsc -p tsconfig.json",
-
     "start": "node dist/index-production.js",
     "start:dev": "node dist/index-production.js",
-
     "dev": "ts-node src/index-production.ts",
     "dev:failfast": "ts-node src/index-failfast.ts",
     "dev:legacy": "ts-node src/index.ts",
-
     "db:init": "ts-node scripts/migrate-database.ts",
     "db:migrate": "ts-node scripts/migrate-database.ts",
     "db:status": "ts-node scripts/check-database.ts",
-
     "test:quick": "bash scripts/quick-test.sh",
     "test:sync": "bash scripts/test-block-sync.sh",
     "test:monitor": "bash scripts/monitor-sync.sh",
     "test:interactive": "bash scripts/interactive-test.sh",
-
     "test:basic": "node tests/container-test.js",
-
     "test:reorg": "node dist/tests/reorg.test.js || echo '⚠️  compile first'",
     "test:stress": "node dist/tests/stress.test.js || echo '⚠️  compile first'",
-
     "test:all": "npm run build && npm run test:reorg && npm run test:stress",
-
     "rebuild": "bash scripts/quick-rebuild.sh",
     "init:container": "bash scripts/init-container-env.sh",
     "fix:build": "bash scripts/fix-container-build.sh",
-
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-
   "dependencies": {
     "@types/pg": "^8.16.0",
     "cors": "^2.8.5",
@@ -53,7 +41,6 @@
     "web3": "^1.10.0",
     "zod": "^3.25.76"
   },
-
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -62,4 +49,3 @@
     "typescript": "^5.0.0"
   }
 }
-

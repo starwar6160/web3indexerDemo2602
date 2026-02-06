@@ -2,6 +2,8 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { createPublicClient, http } from 'viem';
+import { z } from 'zod';
+import { sql } from 'kysely';
 import { BlockRepository } from './database/block-repository';
 import { TransfersRepository } from './database/transfers-repository';
 import { SyncStatusRepository } from './database/sync-status-repository';
@@ -76,6 +78,18 @@ function parseOffsetParam(value: unknown): number {
 }
 
 /**
+ * Zod Schemas for Input Validation (Fail-Fast)
+ */
+const PaginationSchema = z.object({
+  page: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().min(1)).default('1'),
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().min(1).max(100)).default('20'),
+});
+
+const BlockLookupSchema = z.object({
+  id: z.string().regex(/^(0x[a-fA-F0-9]{64}|\d+)$/, 'Must be hex hash or block number'),
+});
+
+/**
  * API Server Configuration
  */
 export interface ApiServerConfig {
@@ -130,7 +144,7 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
 
   /**
    * GET /api/status
-   * Returns sync status: latest block, local max, lag, uptime
+   * Returns detailed sync status with percentage and metrics
    */
   app.get('/api/status', async (req: Request, res: Response) => {
     try {
@@ -144,15 +158,25 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         ? Number(chainHead - localMaxBlock)
         : null;
 
+      const syncPercentage = chainHead && localMaxBlock !== null && chainHead > 0n
+        ? ((Number(localMaxBlock) / Number(chainHead)) * 100).toFixed(2)
+        : '0.00';
+
       const status = {
-        status: dbHealth ? 'healthy' : 'unhealthy',
+        status: dbHealth ? (lag !== null && lag <= 5 ? 'synchronized' : 'syncing') : 'error',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         sync: {
-          localMaxBlock: localMaxBlock?.toString() ?? null,
-          chainHeadBlock: chainHead?.toString() ?? null,
-          lagBlocks: lag,
-          synced: lag !== null && lag <= 5, // Within 5 blocks = synced
+          latestNetworkBlock: chainHead?.toString() ?? null,
+          latestIndexedBlock: localMaxBlock?.toString() ?? null,
+          lag: lag?.toString() ?? null,
+          syncPercentage,
+          synced: lag !== null && lag <= 5,
+        },
+        metrics: {
+          reorgsDetected: metrics.getMetrics().reorgs.detected,
+          rpcErrorRate: metrics.getMetrics().rpc.errorRate,
+          dbWrites: metrics.getMetrics().database.writes,
         },
         database: {
           connected: dbHealth,
@@ -175,13 +199,29 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   });
 
   /**
-   * GET /api/blocks?limit=20
-   * Returns recent blocks (descending order)
+   * GET /api/blocks?page=1&limit=20
+   * Returns paginated blocks with metadata
    */
   app.get('/api/blocks', async (req: Request, res: Response) => {
     try {
-      const limit = parseLimitParam(req.query.limit);
-      const offset = parseOffsetParam(req.query.offset);
+      // Zod validation (fail-fast)
+      const parsed = PaginationSchema.safeParse(req.query);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid pagination parameters',
+          details: parsed.error.issues.map(i => i.message),
+        });
+        return;
+      }
+
+      const { page, limit } = parsed.data;
+      const offset = (page - 1) * limit;
+
+      // Get total count for pagination metadata
+      const totalCount = await blockRepo.db
+        .selectFrom('blocks')
+        .select(sql<number>`count(*)`.as('count'))
+        .executeTakeFirstOrThrow();
 
       const blocks = await blockRepo.db
         .selectFrom('blocks')
@@ -200,12 +240,17 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         created_at: b.created_at,
       }));
 
+      const totalPages = Math.ceil((totalCount?.count || 0) / limit);
+
       res.json({
-        blocks: formatted,
-        pagination: {
+        data: formatted,
+        meta: {
+          total: totalCount?.count || 0,
+          page,
           limit,
-          offset,
-          count: formatted.length,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
         },
       });
     } catch (error) {
@@ -223,14 +268,22 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
    */
   app.get('/api/transfers', async (req: Request, res: Response) => {
     try {
-      const limit = parseLimitParam(req.query.limit);
+      const parsed = PaginationSchema.safeParse(req.query);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid pagination parameters',
+          details: parsed.error.issues.map(i => i.message),
+        });
+        return;
+      }
+
+      const { limit } = parsed.data;
       const contractAddress = req.query.contract as string | undefined;
 
       let transfers;
       if (contractAddress) {
         transfers = await transfersRepo.getByContract(contractAddress, limit);
       } else {
-        // Get recent transfers from all contracts
         transfers = await transfersRepo.db
           .selectFrom('transfers')
           .selectAll()
@@ -246,15 +299,17 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
         log_index: t.log_index,
         from_address: t.from_address,
         to_address: t.to_address,
-        amount: t.amount, // Already string (DECIMAL)
+        amount: t.amount,
         contract_address: t.contract_address,
         created_at: t.created_at,
       }));
 
       res.json({
-        transfers: formatted,
-        count: formatted.length,
-        contractFilter: contractAddress || null,
+        data: formatted,
+        meta: {
+          count: formatted.length,
+          contractFilter: contractAddress || null,
+        },
       });
     } catch (error) {
       logger.error({ error }, 'API /api/transfers failed');
@@ -266,16 +321,40 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
   });
 
   /**
-   * GET /api/blocks/:number
-   * Returns specific block with its transfers
+   * GET /api/blocks/:id
+   * Supports both hex hash (0x...) and block number
    */
-  app.get('/api/blocks/:number', async (req: Request, res: Response) => {
+  app.get('/api/blocks/:id', async (req: Request, res: Response) => {
     try {
-      if (!isValidNumberString(req.params.number)) {
-        res.status(400).json({ error: 'Invalid block number: must be positive integer' });
+      const parsed = BlockLookupSchema.safeParse({ id: req.params.id });
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid block identifier: must be hex hash or block number' });
         return;
       }
-      const blockNumber = BigInt(req.params.number);
+
+      const { id } = parsed.data;
+      let blockNumber: bigint | null = null;
+
+      // Determine if it's a hash or number
+      if (id.startsWith('0x')) {
+        // Look up by hash
+        const block = await blockRepo.db
+          .selectFrom('blocks')
+          .selectAll()
+          .where('hash', '=', id)
+          .executeTakeFirst();
+        if (block) {
+          blockNumber = block.number;
+        }
+      } else {
+        // Direct block number
+        blockNumber = BigInt(id);
+      }
+
+      if (blockNumber === null) {
+        res.status(404).json({ error: 'Block not found' });
+        return;
+      }
 
       const [block, transfers] = await Promise.all([
         blockRepo.findById(blockNumber),
@@ -288,27 +367,27 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
       }
 
       res.json({
-        block: {
+        data: {
           number: block.number.toString(),
           hash: block.hash,
           parent_hash: block.parent_hash,
           timestamp: block.timestamp.toString(),
           chain_id: block.chain_id.toString(),
           created_at: block.created_at,
+          transfers: transfers.map((t) => ({
+            id: t.id,
+            transaction_hash: t.transaction_hash,
+            log_index: t.log_index,
+            from_address: t.from_address,
+            to_address: t.to_address,
+            amount: t.amount,
+            contract_address: t.contract_address,
+          })),
+          transferCount: transfers.length,
         },
-        transfers: transfers.map((t) => ({
-          id: t.id,
-          transaction_hash: t.transaction_hash,
-          log_index: t.log_index,
-          from_address: t.from_address,
-          to_address: t.to_address,
-          amount: t.amount,
-          contract_address: t.contract_address,
-        })),
-        transferCount: transfers.length,
       });
     } catch (error) {
-      logger.error({ error }, 'API /api/blocks/:number failed');
+      logger.error({ error }, 'API /api/blocks/:id failed');
       res.status(500).json({
         error: 'Failed to fetch block',
         message: error instanceof Error ? error.message : 'Unknown error',

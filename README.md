@@ -185,6 +185,11 @@ npx ts-node scripts/monitor-stress-test.ts
   - 将重组检测与回滚逻辑从主追加路径分离为独立组件；
   - 为重组事件记录详细指标（重组深度、触发频率、处理延迟）以便后续调优。
 
+> **"Why I don't trust 64-bit Floats (JS Numbers)"**
+> *   Explain how this indexer protects financial data integrity by forcing BigInt-to-String coercion at the API gateway and using strict BigInt math in the sync engine.
+
+
+
 - 已知权衡与改进方向（简要）
   - 当前实现优先可读性与易维护性，部分极端场景（超高并发 RPC、极深重组、超频写入突发）需要在部署阶段通过配置、RPC 多点冗余与本地缓存策略做生产硬化。
   - 推荐在压力测试环境下复现极端场景并衡量：RPC 吞吐、数据库写入瓶颈、内存占用与重组处理时延，基于观测结果再逐步放大并发与缓存策略。

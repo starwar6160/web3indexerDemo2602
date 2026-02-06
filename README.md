@@ -187,7 +187,7 @@ npx ts-node scripts/monitor-stress-test.ts
 
 > **"Why I don't trust 64-bit Floats (JS Numbers)"**
 > *   Explain how this indexer protects financial data integrity by forcing BigInt-to-String coercion at the API gateway and using strict BigInt math in the sync engine.
-
+本项目包含针对 Web3 极端场景的自动化集成测试”
 
 
 - 已知权衡与改进方向（简要）

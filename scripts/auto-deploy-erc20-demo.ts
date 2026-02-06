@@ -1,30 +1,15 @@
 #!/usr/bin/env ts-node
 
 /**
- * Auto-Deploy ERC20 Demo Data
- *
- * **Purpose**: Automatically deploy ERC20 contract and generate Transfer transactions
- * on startup, so the indexer has real event data to sync immediately.
- *
- * **Usage**: Called automatically by `make dev-with-demo` or `npm run start:with-demo`
- *
- * **Flow**:
- * 1. Deploy ERC20 token contract to Anvil
- * 2. Generate 10-20 Transfer transactions
- * 3. Mine blocks to include transactions
- * 4. Save contract address to .env for indexer
- * 5. Exit so indexer can start syncing
+ * Auto-Deploy SimpleBank Demo Data
  */
 
-import { createWalletClient, http, createPublicClient, parseUnits, type Address } from 'viem';
+import { createWalletClient, http, createPublicClient, parseEther, type Address } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Chain } from 'viem';
 import * as fs from 'fs';
 import * as path from 'path';
 
-/**
- * Local Anvil chain configuration
- */
 const anvilChain: Chain = {
   id: 31337,
   name: 'Anvil',
@@ -36,23 +21,29 @@ const anvilChain: Chain = {
   },
 };
 
-/**
- * Minimal ERC20 Token ABI
- */
-const erc20Abi = [
+const simpleBankAbi = [
   {
-    type: 'function',
-    name: 'transfer',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    outputs: [{ name: '', type: 'bool' }]
+    type: 'constructor',
+    inputs: [],
+    stateMutability: 'nonpayable'
   },
   {
     type: 'function',
-    name: 'mint',
+    name: 'deposit',
+    stateMutability: 'payable',
+    inputs: [],
+    outputs: []
+  },
+  {
+    type: 'function',
+    name: 'withdraw',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: []
+  },
+  {
+    type: 'function',
+    name: 'transfer',
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'to', type: 'address' },
@@ -66,54 +57,29 @@ const erc20Abi = [
     inputs: [
       { name: 'from', type: 'address', indexed: true },
       { name: 'to', type: 'address', indexed: true },
-      { name: 'value', type: 'uint256', indexed: false }
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'timestamp', type: 'uint256', indexed: false }
     ],
     anonymous: false
   }
 ] as const;
 
-/**
- * Simple ERC20 Token Bytecode
- */
-const ERC20_BYTECODE = '0x608060405234801561001057600080fd5b50610121806100206000396000f3fe608060405234801561001057600080fd5b50600436106100495760003560e01c806370a082311161002657806370a082311461004e578063a9059cbb1461007657610049565b600080fd5b6100586100533660046100d4565b6100a2565b60405190815260200160405180910390f35b6100896100843660046100f6565b6100b5565b604051901515815260200160405180910390f35b6001600160a01b031660009081526020819052604090205490565b6001600160a01b03166000908152602081905260409020805460ff19166001179055565b6000602082840312156100e657600080fd5b5035919050565b6000806040838503121561010057600080fd5b8235915060208301356101128161012e565b809150509250929050565b6001600160a01b038116811461012e57600080fdfea264697066735822122000000000000000000000000000000000000000000000000000000000000000064736f6c63430008070033' as `0x${string}`;
+// SimpleBank bytecode - compiled from contracts/SimpleBank.sol
+const SIMPLE_BANK_BYTECODE = '0x6080604052348015600e575f5ffd5b506104e68061001c5f395ff3fe608060405260043610610054575f3560e01c806312065fe01461005857806327e235e3146100865780632e1a7d4d146100b15780637d882097146100d2578063a9059cbb146100e7578063d0e30db014610106575b5f5ffd5b348015610063575f5ffd5b50335f908152602081905260409020545b60405190815260200160405180910390f35b348015610091575f5ffd5b506100746100a0366004610411565b5f6020819052908152604090205481565b3480156100bc575f5ffd5b506100d06100cb366004610431565b61010e565b005b3480156100dd575f5ffd5b5061007460015481565b3480156100f2575f5ffd5b506100d0610101366004610448565b61020b565b6100d0610340565b335f908152602081905260409020548111156101685760405162461bcd60e51b8152602060048201526014602482015273496e73756666696369656e742062616c616e636560601b60448201526064015b60405180910390fd5b335f9081526020819052604081208054839290610186908490610484565b925050819055508060015f82825461019e9190610484565b9091555050604051339082156108fc029083905f818181858888f193505050501580156101cd573d5f5f3e3d5ffd5b506040805182815242602082015233917fdf273cb619d95419a9cd0ec88123a0538c85064229baa6363788f743fff90deb910160405180910390a250565b335f908152602081905260409020548111156102605760405162461bcd60e51b8152602060048201526014602482015273496e73756666696369656e742062616c616e636560601b604482015260640161015f565b6001600160a01b0382166102a85760405162461bcd60e51b815260206004820152600f60248201526e496e76616c6964206164647265737360881b604482015260640161015f565b335f90815260208190526040812080548392906102c6908490610484565b90915550506001600160a01b0382165f90815260208190526040812080548392906102f290849061049d565b9091555050604080518281524260208201526001600160a01b0384169133917f9ed053bb818ff08b8353cd46f78db1f0799f31c9e4458fdb425c10eccd2efc44910160405180910390a35050565b5f341161037f5760405162461bcd60e51b815260206004820152600d60248201526c09aeae6e840e6cadcc8408aa89609b1b604482015260640161015f565b335f908152602081905260408120805434929061039d90849061049d565b925050819055503460015f8282546103b5919061049d565b90915550506040805134815242602082015233917f90890809c654f11d6e72a28fa60149770a0d11ec6c92319d6ceb2bb0a4ea1a15910160405180910390a2565b80356001600160a01b038116811461040c575f5ffd5b919050565b5f60208284031215610421575f5ffd5b61042a826103f6565b9392505050565b5f60208284031215610441575f5ffd5b5035919050565b5f5f60408385031215610459575f5ffd5b610462836103f6565b946020939093013593505050565b634e487b7160e01b5f52601160045260245ffd5b8181038181111561049757610497610470565b92915050565b808201808211156104975761049761047056fea264697066735822122077eb505cb158c7c11f75d2d6ce65406e52ee0ee708ff5128b49c8f66e08ed1fe64736f6c63430008210033' as const;
 
-/**
- * Test accounts (Anvil default)
- * Private keys MUST be exactly 32 bytes (64 hex chars + 0x prefix)
- *
- * Official Anvil default keys from: https://book.getfoundry.sh/reference/anvil/anvil-accounts
- */
 const ANVIL_PKS = [
-  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // Account #0 - 64 chars
-  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d', // Account #1 - 64 chars
-  '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a1', // Account #2 - 64 chars (FIXED!)
-  '0x70997970c51812dc3a010c7d01b50e0d17dc79c82803f146c8e4d3667efb74631', // Account #3 - 64 chars
-  '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc8333b8eff4b6b7011844f383', // Account #4 - 64 chars
+  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+  '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
+  '0x70997970c51812dc3a010c7d01b50e0d17dc79c82803f146c8e4d3667efb7463',
+  '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc8333b8eff4b6b7011844f383',
 ] as const;
 
-// Verify all keys are 64 hex characters (excluding 0x prefix)
-ANVIL_PKS.forEach((pk, i) => {
-  const hexChars = pk.slice(2);
-  if (hexChars.length !== 64) {
-    throw new Error(`Private key ${i} has invalid length: ${hexChars.length} chars (expected 64)`);
-  }
-});
+const ACCOUNTS = ANVIL_PKS.map(pk => privateKeyToAccount(pk));
 
-const ACCOUNT_1 = privateKeyToAccount(ANVIL_PKS[0]);
-const ACCOUNT_2 = privateKeyToAccount(ANVIL_PKS[1]);
-const ACCOUNT_3 = privateKeyToAccount(ANVIL_PKS[2]);
-const ACCOUNT_4 = privateKeyToAccount(ANVIL_PKS[3]);
-const ACCOUNT_5 = privateKeyToAccount(ANVIL_PKS[4]);
-
-const ACCOUNTS = [ACCOUNT_1, ACCOUNT_2, ACCOUNT_3, ACCOUNT_4, ACCOUNT_5];
-
-/**
- * Main deployment function
- */
 async function main() {
-  console.log('\n🎨 Auto-Deploying ERC20 Demo Data...\n');
+  console.log('\n🎨 Auto-Deploying SimpleBank Demo Data...\n');
 
-  // Setup clients
   const publicClient = createPublicClient({
     chain: anvilChain,
     transport: http(),
@@ -125,13 +91,11 @@ async function main() {
     transport: http(),
   });
 
-  // Step 1: Deploy ERC20 Token
-  console.log('1️⃣  Deploying ERC20 Token contract...');
+  console.log('1️⃣  Deploying SimpleBank contract...');
   try {
     const deployHash = await deployerWallet.deployContract({
-      abi: erc20Abi,
-      bytecode: ERC20_BYTECODE,
-      args: ['Demo Token', 'DEMO', 18, parseUnits('1000000000', 18)], // 1B tokens
+      abi: simpleBankAbi,
+      bytecode: SIMPLE_BANK_BYTECODE,
     });
 
     const receipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
@@ -140,21 +104,46 @@ async function main() {
       throw new Error('Contract deployment failed');
     }
 
-    const tokenAddress = receipt.contractAddress;
-    console.log(`   ✅ Contract deployed: ${tokenAddress}\n`);
+    const contractAddress = receipt.contractAddress;
+    console.log(`   ✅ Contract deployed: ${contractAddress}\n`);
 
-    // Step 2: Generate Transfer transactions
-    console.log('2️⃣  Generating Transfer transactions...');
+    console.log('2️⃣  Pre-funding accounts...');
+    const fundedAccounts: typeof ACCOUNTS = [];
+    for (let i = 0; i < ACCOUNTS.length; i++) {
+      const account = ACCOUNTS[i];
+      const walletClient = createWalletClient({
+        account,
+        chain: anvilChain,
+        transport: http(),
+      });
+      try {
+        const depositHash = await walletClient.writeContract({
+          address: contractAddress,
+          abi: simpleBankAbi,
+          functionName: 'deposit',
+          value: parseEther('100'),
+        });
+        await publicClient.waitForTransactionReceipt({ hash: depositHash });
+        process.stdout.write(`.`);
+        fundedAccounts.push(account);
+      } catch {
+        process.stdout.write(`x`);
+      }
+    }
+    console.log(` ✅ Funded ${fundedAccounts.length} accounts\n`);
 
-    const transfers: Array<{ from: string; to: string; amount: string; tx: string }> = [];
+    if (fundedAccounts.length < 2) {
+      console.log('❌ Not enough funded accounts to generate transfers');
+      process.exit(1);
+    }
+
+    console.log('3️⃣  Generating transfers...');
     let txCount = 0;
 
-    // Generate 20 random transfers
     for (let i = 0; i < 20; i++) {
-      const fromAccount = ACCOUNTS[Math.floor(Math.random() * ACCOUNTS.length)];
-      const toAccount = ACCOUNTS[Math.floor(Math.random() * ACCOUNTS.length)];
+      const fromAccount = fundedAccounts[Math.floor(Math.random() * fundedAccounts.length)];
+      const toAccount = fundedAccounts[Math.floor(Math.random() * fundedAccounts.length)];
 
-      // Skip if same account
       if (fromAccount.address === toAccount.address) continue;
 
       const walletClient = createWalletClient({
@@ -163,67 +152,34 @@ async function main() {
         transport: http(),
       });
 
-      // Random amount between 1 and 1000 tokens
-      const randomAmount = Math.floor(Math.random() * 1000) + 1;
-      const amount = parseUnits(randomAmount.toString(), 18);
+      const randomAmount = Math.floor(Math.random() * 100) + 1; // 1-100 ETH
+      const amount = parseEther(randomAmount.toString());
 
       try {
+        // Transfer (accounts already have balance from pre-funding)
         const txHash = await walletClient.writeContract({
-          address: tokenAddress,
-          abi: erc20Abi,
+          address: contractAddress,
+          abi: simpleBankAbi,
           functionName: 'transfer',
           args: [toAccount.address, amount],
         });
 
         await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-        transfers.push({
-          from: fromAccount.address,
-          to: toAccount.address,
-          amount: amount.toString(),
-          tx: txHash,
-        });
-
         txCount++;
 
         if (txCount % 5 === 0) {
           console.log(`   • Generated ${txCount} transfers...`);
         }
       } catch (error) {
-        // Mint tokens to account if they don't have enough
-        const mintHash = await deployerWallet.writeContract({
-          address: tokenAddress,
-          abi: erc20Abi,
-          functionName: 'mint',
-          args: [fromAccount.address, parseUnits('10000', 18)],
-        });
-
-        await publicClient.waitForTransactionReceipt({ hash: mintHash });
-
-        // Retry transfer
-        const txHash = await walletClient.writeContract({
-          address: tokenAddress,
-          abi: erc20Abi,
-          functionName: 'transfer',
-          args: [toAccount.address, amount],
-        });
-
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-        transfers.push({
-          from: fromAccount.address,
-          to: toAccount.address,
-          amount: amount.toString(),
-          tx: txHash,
-        });
-
-        txCount++;
+        const message = error instanceof Error ? error.message : 'unknown error';
+        if (message.includes('Insufficient')) {
+          console.log(`   ⚠️  Transfer ${i + 1}: insufficient balance`);
+        }
       }
     }
 
     console.log(`   ✅ Generated ${txCount} transfers\n`);
 
-    // Step 3: Save to .env
     console.log('3️⃣  Saving configuration...');
     const envPath = path.join(process.cwd(), '.env');
     let envContent = '';
@@ -232,22 +188,18 @@ async function main() {
       envContent = fs.readFileSync(envPath, 'utf-8');
     }
 
-    // Remove existing TOKEN_CONTRACT_ADDRESS line if exists
     envContent = envContent
       .split('\n')
       .filter(line => !line.startsWith('TOKEN_CONTRACT_ADDRESS='))
       .join('\n');
 
-    // Add new TOKEN_CONTRACT_ADDRESS
-    envContent += `\nTOKEN_CONTRACT_ADDRESS=${tokenAddress}\n`;
-
+    envContent += `\nTOKEN_CONTRACT_ADDRESS=${contractAddress}\n`;
     fs.writeFileSync(envPath, envContent);
-    console.log(`   ✅ Updated .env with TOKEN_CONTRACT_ADDRESS=${tokenAddress}\n`);
+    console.log(`   ✅ Updated .env with TOKEN_CONTRACT_ADDRESS=${contractAddress}\n`);
 
-    // Step 4: Summary
     console.log('🎉 Demo data generation complete!\n');
     console.log('📊 Summary:');
-    console.log(`   • Contract: ${tokenAddress}`);
+    console.log(`   • Contract: ${contractAddress}`);
     console.log(`   • Transfers: ${txCount}`);
     console.log(`   • Blocks mined: ~${txCount + 2}`);
     console.log('');
@@ -260,7 +212,6 @@ async function main() {
   }
 }
 
-// Run
 main().catch((error) => {
   console.error('Fatal error:', error);
   process.exit(1);

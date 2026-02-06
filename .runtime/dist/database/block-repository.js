@@ -202,18 +202,7 @@ class BlockRepository {
             .selectFrom('blocks')
             .select((0, kysely_1.sql) `count(*)`.as('count'))
             .executeTakeFirst();
-        const count = result?.count;
-        if (count === null || count === undefined) {
-            return 0;
-        }
-        // PostgreSQL may return string for very large counts
-        if (typeof count === 'string') {
-            return parseInt(count, 10);
-        }
-        if (typeof count === 'bigint') {
-            return Number(count);
-        }
-        return count;
+        return result?.count ?? 0;
     }
     async existsByNumber(number) {
         const result = await this.db

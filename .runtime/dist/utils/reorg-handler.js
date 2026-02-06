@@ -68,18 +68,9 @@ async function detectReorg(blockRepository, newBlockHash, newBlockNumber, expect
         }, 'Reorg detected: Block hash mismatch');
         // Find common ancestor to determine reorg depth
         const commonAncestor = await findCommonAncestor(blockRepository, expectedParentHash, newBlockNumber);
-        // 🟡 Fix A1: Keep reorgDepth as bigint to avoid precision loss
-        // Problem: Number(newBlockNumber - commonAncestor) loses precision if > 2^53
-        // Solution: Keep as bigint and convert to number only when safe
-        const reorgDepthBigInt = commonAncestor
-            ? newBlockNumber - commonAncestor
-            : 0n;
-        // Validate safe conversion before using as number
-        if (reorgDepthBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error(`Reorg depth ${reorgDepthBigInt} exceeds safe integer range (${Number.MAX_SAFE_INTEGER}). ` +
-                `This indicates an extreme reorg that may require manual intervention.`);
-        }
-        const reorgDepth = Number(reorgDepthBigInt);
+        const reorgDepth = commonAncestor
+            ? Number(newBlockNumber - commonAncestor)
+            : 0;
         return {
             detected: true,
             reorgDepth,
@@ -103,19 +94,7 @@ async function findCommonAncestor(blockRepository, newChainParentHash, forkBlock
     let currentNumber = forkBlock - 1n;
     const maxDepth = 1000; // Safety limit
     let iterations = 0;
-    const visitedHashes = new Set(); // 🟣 Fix R3: Detect circular references
     while (iterations < maxDepth && currentNumber >= 0n) {
-        // 🟣 Fix R3: Detect circular references to prevent infinite loops
-        // Problem: If block parent_hash chain forms a cycle (theoretically impossible),
-        // maxDepth might not be sufficient or we might loop infinitely
-        // Solution: Track visited hashes and detect cycles early
-        if (visitedHashes.has(currentHash)) {
-            logger_1.default.error({ blockNumber: currentNumber.toString(), hash: currentHash }, 'Circular reference detected in blockchain - parent hash chain forms a cycle');
-            throw new Error(`Circular reference detected at block ${currentNumber}. ` +
-                `This indicates data corruption or invalid blockchain data. ` +
-                `Manual intervention required.`);
-        }
-        visitedHashes.add(currentHash);
         // Check if this block exists in our database
         const existingBlock = await blockRepository.findById(currentNumber);
         if (existingBlock && existingBlock.hash === currentHash) {

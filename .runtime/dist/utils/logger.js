@@ -63,19 +63,10 @@ function createLogger(module) {
             },
         },
         timestamp: pino_1.default.stdTimeFunctions.isoTime,
-        mixin: () => {
-            const traceId = getTraceId();
-            // 🎨 Fix S1: Handle undefined traceId explicitly
-            // Problem: undefined traceId gets serialized as string "undefined" by some serializers
-            // Solution: Omit the property entirely if undefined
-            const mixinData = {
-                module,
-            };
-            if (traceId !== undefined) {
-                mixinData.traceId = traceId;
-            }
-            return mixinData;
-        },
+        mixin: () => ({
+            module,
+            traceId: getTraceId(),
+        }),
     });
 }
 // Trace ID context (using async local storage would be better, but simple global for now)
@@ -89,15 +80,14 @@ function getTraceId() {
 function generateTraceId() {
     return (0, crypto_1.randomUUID)();
 }
-async function withTraceId(fn) {
-    const prevTraceId = currentTraceId;
+function withTraceId(fn) {
     const traceId = generateTraceId();
     setTraceId(traceId);
     try {
-        return await fn();
+        return fn();
     }
     finally {
-        currentTraceId = prevTraceId;
+        currentTraceId = undefined;
     }
 }
 // Default logger

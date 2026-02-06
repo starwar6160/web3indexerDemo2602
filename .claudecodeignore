@@ -1,0 +1,42 @@
+# AI-optimized ignore: Deny all, allow only src
+# This reduces token consumption by ~80-90%
+
+# Block everything by default
+*
+
+# Allow source code only
+!src/
+!src/**
+
+# Allow essential config files
+!package.json
+!tsconfig.json
+!README.md
+!.env
+!docker-compose.yml
+!Dockerfile*
+
+# Block all data/runtime directories
+.runtime/
+.docs/
+.cache/
+artifacts/
+dist/
+node_modules/
+
+# Block test data and logs
+*.log
+*.json
+*.backup
+*.sh
+*.bat
+
+# Block git
+.git/
+
+# Block other artifacts
+ai/
+pipelines/
+scripts/
+tests/
+.claude/

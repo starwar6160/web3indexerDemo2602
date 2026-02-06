@@ -18,16 +18,16 @@ const EnvSchema = zod_1.z.object({
     // RPC 配置
     RPC_URL: zod_1.z.string().url('RPC_URL must be a valid HTTP URL').default('http://localhost:8545'),
     // 性能配置
-    POLL_INTERVAL_MS: zod_1.z.string().min(1, 'POLL_INTERVAL_MS cannot be empty').transform(Number).pipe(zod_1.z.number().int().positive().max(60000) // 最大60秒
+    POLL_INTERVAL_MS: zod_1.z.string().transform(Number).pipe(zod_1.z.number().int().positive().max(60000) // 最大60秒
     ).default('2000'),
-    DB_SYNC_BATCH_SIZE: zod_1.z.string().min(1, 'DB_SYNC_BATCH_SIZE cannot be empty').transform(Number).pipe(zod_1.z.number().int().positive().max(100) // 最大100个区块
+    DB_SYNC_BATCH_SIZE: zod_1.z.string().transform(Number).pipe(zod_1.z.number().int().positive().max(100) // 最大100个区块
     ).default('10'),
-    MAX_RETRIES: zod_1.z.string().min(1, 'MAX_RETRIES cannot be empty').transform(Number).pipe(zod_1.z.number().int().positive().max(10)).default('3'),
+    MAX_RETRIES: zod_1.z.string().transform(Number).pipe(zod_1.z.number().int().positive().max(10)).default('3'),
     // 日志配置
     LOG_LEVEL: zod_1.z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
     NODE_ENV: zod_1.z.enum(['development', 'production', 'test']).default('development'),
     // 健康检查配置
-    HEALTH_CHECK_PORT: zod_1.z.string().min(1, 'HEALTH_CHECK_PORT cannot be empty').transform(Number).pipe(zod_1.z.number().int().positive().max(65535)).default('3000'),
+    HEALTH_CHECK_PORT: zod_1.z.string().transform(Number).pipe(zod_1.z.number().int().positive().max(65535)).default('3000'),
 });
 /**
  * 验证 RPC URL 连通性

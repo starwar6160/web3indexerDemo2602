@@ -232,7 +232,7 @@ async function getMetrics(rpcClient) {
             uptime: process.uptime(),
             memory: process.memoryUsage(),
             blockCount,
-            localMax: localMax?.toString() ?? null,
+            localMax: localMax?.toString() ?? 'null',
             chainMax: chainMax.toString(),
             syncLag: lag,
             syncStatus: lag <= 10 ? 'up_to_date' : lag <= 100 ? 'behind' : 'critical',

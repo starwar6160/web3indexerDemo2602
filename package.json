@@ -2,34 +2,42 @@
   "name": "web3-indexer-demo",
   "version": "1.0.0",
   "description": "Web3 backend indexer demo with Anvil and PostgreSQL",
+
   "main": "dist/index.js",
+
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
+
     "start": "node dist/index-production.js",
     "start:dev": "node dist/index-production.js",
-    "dev": "ts-node index-production.ts",
-    "dev:failfast": "ts-node index-failfast.ts",
-    "dev:legacy": "ts-node index.ts",
+
+    "dev": "ts-node src/index-production.ts",
+    "dev:failfast": "ts-node src/index-failfast.ts",
+    "dev:legacy": "ts-node src/index.ts",
+
     "db:init": "ts-node scripts/migrate-database.ts",
     "db:migrate": "ts-node scripts/migrate-database.ts",
     "db:status": "ts-node scripts/check-database.ts",
+
     "test:quick": "bash scripts/quick-test.sh",
     "test:sync": "bash scripts/test-block-sync.sh",
     "test:monitor": "bash scripts/monitor-sync.sh",
     "test:interactive": "bash scripts/interactive-test.sh",
-    "test:basic": "DATABASE_URL='postgresql://postgres:password@localhost:15432/web3_indexer' RPC_URL='http://localhost:58545' node tests/container-test.js",
-    "test:db": "DATABASE_URL='postgresql://postgres:password@localhost:15432/web3_indexer' RPC_URL='http://localhost:58545' node tests/container-test.js",
-    "test:reorg": "node dist/tests/reorg.test.js || echo '⚠️  Tests need compilation'",
-    "test:stress": "node dist/tests/stress.test.js || echo '⚠️  Tests need compilation'",
-    "test:all": "npm run test:basic && npm run test:reorg && npm run test:stress",
+
+    "test:basic": "node tests/container-test.js",
+
+    "test:reorg": "node dist/tests/reorg.test.js || echo '⚠️  compile first'",
+    "test:stress": "node dist/tests/stress.test.js || echo '⚠️  compile first'",
+
+    "test:all": "npm run build && npm run test:reorg && npm run test:stress",
+
     "rebuild": "bash scripts/quick-rebuild.sh",
     "init:container": "bash scripts/init-container-env.sh",
     "fix:build": "bash scripts/fix-container-build.sh",
-    "container:quick": "bash scripts/container-quick-test.sh",
-    "container:monitor": "bash scripts/container-monitor.sh",
-    "container:interactive": "bash scripts/container-interactive.sh",
+
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+
   "dependencies": {
     "@types/pg": "^8.16.0",
     "dotenv": "^17.2.3",
@@ -42,9 +50,11 @@
     "web3": "^1.10.0",
     "zod": "^3.25.76"
   },
+
   "devDependencies": {
     "@types/node": "^20.19.31",
     "ts-node": "^10.9.0",
     "typescript": "^5.0.0"
   }
 }
+

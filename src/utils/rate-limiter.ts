@@ -21,6 +21,19 @@ export class TokenBucketRateLimiter {
   private options: Required<RateLimiterOptions>;
 
   constructor(options: RateLimiterOptions) {
+    // P0 Fix: Validate tokensPerInterval to prevent division by zero and infinite loops
+    if (options.tokensPerInterval <= 0) {
+      throw new Error(
+        `Invalid tokensPerInterval: ${options.tokensPerInterval}. ` +
+        `Must be > 0 to prevent infinite loops and stack overflow.`
+      );
+    }
+    if (options.intervalMs <= 0) {
+      throw new Error(
+        `Invalid intervalMs: ${options.intervalMs}. Must be > 0.`
+      );
+    }
+
     this.options = {
       tokensPerInterval: options.tokensPerInterval,
       intervalMs: options.intervalMs,
@@ -46,8 +59,9 @@ export class TokenBucketRateLimiter {
     // Calculate tokens to add
     const tokensToAdd = (elapsedMs / this.options.intervalMs) * this.options.tokensPerInterval;
 
-    // Update tokens, capped at max burst
-    this.tokens = Math.min(this.options.maxBurstTokens, this.tokens + tokensToAdd);
+    // P1 Fix: Use Math.floor to prevent floating point precision drift
+    // Long-running processes could accumulate errors without truncation
+    this.tokens = Math.floor(Math.min(this.options.maxBurstTokens, this.tokens + tokensToAdd));
     this.lastRefillTimestamp = now;
   }
 
@@ -79,17 +93,38 @@ export class TokenBucketRateLimiter {
   }
 
   /**
-   * Consume token with automatic wait
+   * Consume token with automatic wait (P0 Fix: loop-based, no recursion)
    */
-  public async consume(tokens: number = 1): Promise<void> {
-    const result = this.tryConsume(tokens);
+  public async consume(tokens: number = 1, maxRetries: number = 100): Promise<void> {
+    // P0 Fix: Convert tail recursion to loop to prevent stack overflow
+    // Scenario: tokensPerInterval=0 or clock skew causes infinite waitTimeMs
+    let retries = 0;
 
-    if (!result.allowed && result.waitTimeMs > 0) {
-      // Wait until we have enough tokens
+    while (retries < maxRetries) {
+      const result = this.tryConsume(tokens);
+
+      if (result.allowed) {
+        return; // Success
+      }
+
+      if (result.waitTimeMs <= 0) {
+        // P0 Fix: Detect invalid state (should not happen with validation)
+        throw new Error(
+          `Rate limiter invalid state: waitTimeMs=${result.waitTimeMs}, ` +
+          `tokens=${this.tokens}. Check configuration.`
+        );
+      }
+
+      // Wait and retry (loop instead of recursion)
       await new Promise(resolve => setTimeout(resolve, result.waitTimeMs));
-      // Retry after waiting
-      return this.consume(tokens);
+      retries++;
     }
+
+    // P0 Fix: Prevent infinite loop detection
+    throw new Error(
+      `Rate limiter exceeded max retries (${maxRetries}). ` +
+      `Possible configuration error or system time issue.`
+    );
   }
 
   /**

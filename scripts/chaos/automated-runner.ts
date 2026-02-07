@@ -45,6 +45,15 @@ function cleanupPorts() {
       // Port already clear or doesn't exist
     }
   });
+
+  // CRITICAL: Synchronous blocking wait for kernel to release sockets
+  // This prevents EADDRINUSE errors on rapid restart
+  console.log('\n⏸️  Waiting 2 seconds for kernel to release sockets...\n');
+  const start = Date.now();
+  while (Date.now() - start < 2000) {
+    // Synchronous busy wait (Rust-style blocking)
+  }
+  console.log('✅ Ports cleared and cooled down\n');
 }
 
 // ============================================================

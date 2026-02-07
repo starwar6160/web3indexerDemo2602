@@ -72,6 +72,12 @@ async function main() {
     });
     console.log(`✅ Funded ${account.address} with 10000 ETH`);
 
+    // Get token contract address FIRST (fix TDZ error)
+    const tokenAddress = process.env.TOKEN_CONTRACT_ADDRESS;
+    if (!tokenAddress) {
+      throw new Error('TOKEN_CONTRACT_ADDRESS not set in environment');
+    }
+
     // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
     console.log('\n💰 Depositing to get SimpleBank tokens...');
     const depositHash = await walletClient.writeContract({
@@ -87,12 +93,6 @@ async function main() {
     // Get current block number
     const currentBlock = await publicClient.getBlockNumber();
     console.log(`📍 Current block: ${currentBlock}`);
-
-    // Get token contract address
-    const tokenAddress = process.env.TOKEN_CONTRACT_ADDRESS;
-    if (!tokenAddress) {
-      throw new Error('TOKEN_CONTRACT_ADDRESS not set in environment');
-    }
 
     console.log(`\n📝 Phase 1: Creating canonical chain (5 blocks with transfers)...`);
 

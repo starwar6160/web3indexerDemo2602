@@ -94,26 +94,28 @@ async function main() {
     console.log(`✅ Funded ${account.address} with 10000 ETH`);
 
     // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
-    console.log('\n💰 Depositing to get SimpleBank tokens...');
+    // Deposit 500 ETH to have enough for the 100 ETH large transfer
+    console.log('\n💰 Depositing 500 ETH to get SimpleBank tokens...');
     const depositHash = await walletClient.writeContract({
       address: TOKEN_CONTRACT as `0x${string}`,
       abi: SIMPLE_BANK_ABI,
       functionName: 'deposit',
-      value: parseEther('1000'), // Deposit 1000 ETH
+      value: parseEther('500'), // Deposit 500 ETH
     });
 
     await publicClient.waitForTransactionReceipt({ hash: depositHash });
-    console.log(`✅ Deposited 1000 ETH, received tokens\n`);
+    console.log(`✅ Deposited 500 ETH, received tokens\n`);
 
     // ==========================================
     // TEST 1: LARGE VALUE (Exceeds Number.MAX_SAFE_INTEGER)
     // ==========================================
     console.log('🔥 TEST 1: Large Value Transfer');
-    console.log('   Transferring: 10^25 wei (exceeds JavaScript Number.MAX_SAFE_INTEGER)');
+    console.log('   Transferring: 100 ETH (exceeds JS Safe Integer)');
 
-    // Use 10^25 which exceeds Number.MAX_SAFE_INTEGER (2^53 - 1)
-    // but is reasonable for token balance
-    const LARGE_VALUE = 10000000000000000000000000n; // 10^25 wei
+    // Use 100 ETH = 10^20 wei
+    // This exceeds Number.MAX_SAFE_INTEGER (9 * 10^15) by 10,000x
+    // But is affordable since we deposited 500 ETH
+    const LARGE_VALUE = parseEther('100'); // 100 ETH = 10^20 wei
 
     const maxTxHash = await walletClient.sendTransaction({
       to: TOKEN_CONTRACT as `0x${string}`,
@@ -211,7 +213,7 @@ async function main() {
 
     console.log(`\n📊 TEST RESULTS:`);
     console.log(`\n🔍 Check your database:`);
-    console.log(`   -- Large value test:`);
+    console.log(`   -- Large value test (100 ETH):`);
     console.log(`      SELECT * FROM transfers WHERE amount = '${LARGE_VALUE.toString()}' ORDER BY block_number DESC LIMIT 1;`);
     console.log(`\n   -- Minimum value test:`);
     console.log(`      SELECT * FROM transfers WHERE amount = '1' ORDER BY block_number DESC LIMIT 1;`);
@@ -223,7 +225,7 @@ async function main() {
 
     console.log(`\n✅ TEST COMPLETE!`);
     console.log(`\n💡 What to check:`);
-    console.log(`   1. Does the database store the large 10^25 value?`);
+    console.log(`   1. Does the database store the 100 ETH value correctly?`);
     console.log(`   2. Does the UI render it correctly (not NaN/Infinity)?`);
     console.log(`   3. Are all 100 dust transfers indexed?`);
     console.log(`   4. Is the 1 wei transfer preserved with full precision?`);

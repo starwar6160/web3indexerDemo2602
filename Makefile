@@ -27,9 +27,15 @@ help:
 	@echo '  make test           # Run all tests'
 	@echo '  make doctor         # Check system health'
 
-## install: Install dependencies and setup environment
+## install-deps: Auto-install Docker, Docker Compose, and Node.js (Ubuntu/Fedora/CentOS)
+install-deps:
+	@echo '$(BLUE)🔧 Auto-installing system dependencies...$(NC)'
+	@echo '$(YELLOW)This script requires sudo privileges.$(NC)'
+	@./scripts/auto-install.sh
+
+## install: Install Node.js dependencies and setup environment
 install:
-	@echo '$(BLUE)📦 Installing dependencies...$(NC)'
+	@echo '$(BLUE)📦 Installing Node.js dependencies...$(NC)'
 	npm install
 	@echo '$(GREEN)✅ Dependencies installed$(NC)'
 	@echo ''

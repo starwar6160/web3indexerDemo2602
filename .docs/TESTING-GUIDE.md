@@ -201,11 +201,11 @@ chmod +x scripts/*.sh
 # 检查服务状态
 docker-compose ps
 
-# 检查 Anvil 日志
+# 检查区块链节点 (Anvil) 日志
 docker logs web3-indexer-anvil
 
 # 重启服务
-docker-compose restart anvil
+docker-compose restart blockchain-node
 ```
 
 ### 问题 3: 索引器没有同步数据

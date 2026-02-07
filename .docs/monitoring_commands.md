@@ -149,8 +149,8 @@ docker exec web3-indexer-db telnet localhost 5432
 
 ### 重启服务
 ```bash
-# 重启Anvil
-docker-compose restart anvil
+# 重启区块链节点 (Anvil)
+docker-compose restart blockchain-node
 
 # 重启PostgreSQL
 docker-compose restart postgres

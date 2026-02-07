@@ -566,7 +566,15 @@ export async function startApiServer(config: Partial<ApiServerConfig> = {}): Pro
         ? `http://localhost:${finalConfig.port}/dashboard`
         : `http://localhost:${finalConfig.port}/dashboard`;
 
-      const accessInfo = {
+      // Define flexible access info interface to allow dynamic WSL fields
+      interface AccessInfo {
+        port: number;
+        dashboard: string;
+        endpoints: string[];
+        [key: string]: any; // Allow dynamic string keys
+      }
+
+      const accessInfo: AccessInfo = {
         port: finalConfig.port,
         dashboard: dashboardURL,
         endpoints: [

@@ -20,8 +20,8 @@
  * - Batch operations should complete successfully
  */
 
-import { createWalletClient, createPublicClient, http, parseUnits, MaxUint256 } from 'viem';
-import { anvil } from 'viem/chains';
+import { createWalletClient, createPublicClient, http, parseUnits, maxUint256 } from 'viem';
+import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
@@ -71,11 +71,11 @@ async function main() {
     // ==========================================
     console.log('🔥 TEST 1: Maximum Value Transfer');
     console.log('   Transferring: 2^256 - 1 wei (uint256 max)');
-    console.log(`   This is ${MaxUint256.toString()} wei`);
+    console.log(`   This is ${maxUint256.toString()} wei`);
 
     const maxTxHash = await walletClient.sendTransaction({
       to: TOKEN_CONTRACT as `0x${string}`,
-      data: encodeTransfer(recipient1, MaxUint256),
+      data: encodeTransfer(recipient1, maxUint256),
     });
 
     console.log(`   ✅ Transaction sent: ${maxTxHash}`);
@@ -170,7 +170,7 @@ async function main() {
     console.log(`\n📊 TEST RESULTS:`);
     console.log(`\n🔍 Check your database:`);
     console.log(`   -- Maximum value test:`);
-    console.log(`      SELECT * FROM transfers WHERE amount = '${MaxUint256.toString()}' ORDER BY block_number DESC LIMIT 1;`);
+    console.log(`      SELECT * FROM transfers WHERE amount = '${maxUint256.toString()}' ORDER BY block_number DESC LIMIT 1;`);
     console.log(`\n   -- Minimum value test:`);
     console.log(`      SELECT * FROM transfers WHERE amount = '1' ORDER BY block_number DESC LIMIT 1;`);
     console.log(`\n   -- Dust attack count:`);

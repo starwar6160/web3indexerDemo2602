@@ -17,8 +17,8 @@
  * 5. Indexer re-syncs with new canonical chain
  */
 
-import { createWalletClient, createPublicClient, http, parseEther } from 'viem';
-import { anvil } from 'viem/chains';
+import { createWalletClient, createPublicClient, http } from 'viem';
+import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';

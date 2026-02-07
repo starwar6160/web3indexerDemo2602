@@ -22,7 +22,7 @@
 
 import http from 'http';
 import { createPublicClient, http as viemHttp } from 'viem';
-import { anvil } from 'viem/chains';
+import { foundry as anvil } from 'viem/chains';
 
 const PROXY_PORT = 8546;
 const TARGET_RPC = process.env.RPC_URL || 'http://localhost:58545';
@@ -230,14 +230,15 @@ async function main() {
     process.stdin.setEncoding('utf8');
 
     process.stdin.on('data', (key) => {
-      if (key === 'q') {
+      const input = key.toString().trim().toLowerCase();
+      if (input === 'q') {
         console.log('\n🛑 Shutting down proxy...');
         proxyServer.close();
         process.exit(0);
-      } else if (key === 's') {
+      } else if (input === 's') {
         chaosEnabled = !chaosEnabled;
         console.log(`\n${chaosEnabled ? '☠️  Chaos ENABLED' : '✅ Chaos DISABLED'}\n`);
-      } else if (key === 'i') {
+      } else if (input === 'i') {
         console.log('\n📊 Chaos Statistics:');
         console.log(`   Total requests: ${requestCount}`);
         console.log(`   Delayed: ${chaosStats.delayed} (${((chaosStats.delayed / requestCount) * 100).toFixed(1)}%)`);

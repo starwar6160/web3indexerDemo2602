@@ -23,7 +23,7 @@
 
 import { execSync } from 'child_process';
 import { createWalletClient, createPublicClient, http } from 'viem';
-import { anvil } from 'viem/chains';
+import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';

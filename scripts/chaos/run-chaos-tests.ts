@@ -111,7 +111,7 @@ function runTest(test: ChaosTest) {
   console.log('─'.repeat(60) + '\n');
 
   try {
-    execSync(`npx ts-node ${test.file}`, {
+    execSync(`npx ts-node --transpile-only ${test.file}`, {
       stdio: 'inherit',
       cwd: process.cwd(),
     });

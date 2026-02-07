@@ -1,22 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
+    "target": "ESNext",
+    "module": "CommonJS",
+    "lib": ["ESNext"],
     "outDir": "./dist",
-    "noEmitOnError": false,
 
     "strict": false,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": false,
     "noImplicitAny": false,
     "strictNullChecks": false,
-    "strictFunctionTypes": false,
-    "strictPropertyInitialization": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
 
     "moduleResolution": "node",
-    "resolveJsonModule": false,
+    "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "types": ["node"],
 
@@ -27,25 +23,18 @@
   },
 
   "include": [
-    "src/**/*.ts"
+    "src/**/*"
   ],
 
   "exclude": [
     "node_modules",
     "dist",
-    "artifacts",
-    "cache",
-    "data",
     "tests",
-    "scripts",
-    "**/*.test.ts"
+    "scripts"
   ],
 
   "ts-node": {
-    "compilerOptions": {
-      "module": "commonjs",
-      "esModuleInterop": true
-    }
+    "transpileOnly": true
   }
 }
 

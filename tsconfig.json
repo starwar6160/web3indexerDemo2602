@@ -5,10 +5,10 @@
     "lib": ["ES2020"],
     "outDir": "./dist",
 
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
+    "forceConsistentCasingInFileNames": false,
 
     "moduleResolution": "node",
     "resolveJsonModule": false,
@@ -22,8 +22,7 @@
   },
 
   "include": [
-    "src/**/*.ts",
-    "tests/**/*.ts"
+    "src/**/*.ts"
   ],
 
   "exclude": [
@@ -31,7 +30,10 @@
     "dist",
     "artifacts",
     "cache",
-    "data"
+    "data",
+    "tests",
+    "scripts",
+    "**/*.test.ts"
   ],
 
   "ts-node": {

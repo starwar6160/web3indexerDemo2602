@@ -4,7 +4,7 @@ import { createDbConnection } from '../database-config';
  * Migration 002: Add parent_hash index for reorg performance
  */
 export async function up(): Promise<void> {
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   console.log('[Migration 002] Adding parent_hash index...');
 
@@ -26,7 +26,7 @@ export async function up(): Promise<void> {
 }
 
 export async function down(): Promise<void> {
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   console.log('[Migration 002] Dropping parent_hash index...');
 

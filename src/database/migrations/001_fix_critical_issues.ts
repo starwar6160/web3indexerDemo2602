@@ -14,7 +14,7 @@ import { sql } from 'kysely';
 export async function up(): Promise<void> {
   console.log('[MIGRATION 001] Starting critical fixes migration...');
 
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   try {
     // 1. 修改 timestamp 字段类型：integer -> bigint
@@ -95,7 +95,7 @@ export async function up(): Promise<void> {
 export async function down(): Promise<void> {
   console.log('[MIGRATION 001] Rolling back migration...');
 
-  const db = createDbConnection();
+  const db = await createDbConnection();
 
   try {
     // 删除复合索引

@@ -5,6 +5,31 @@ import { createDbConnection } from '../database/database-config';
 import { createPublicClient, http as viemHttp } from 'viem';
 import { config } from './config';
 
+/**
+ * Health check cache to reduce DB/RPC pressure
+ * K8s probes can hit multiple times per second
+ */
+interface HealthCache {
+  data: HealthStatus;
+  timestamp: number;
+}
+
+let healthCache: HealthCache | null = null;
+const CACHE_TTL_MS = 5000; // 5秒缓存
+
+/**
+ * BigInt-safe JSON serializer
+ * CRITICAL: Prevents serialization errors when BigInt values are present
+ */
+function safeJSONStringify(obj: unknown, space?: number): string {
+  return JSON.stringify(obj, (_, value) => {
+    if (typeof value === 'bigint') {
+      return value.toString();
+    }
+    return value;
+  }, space);
+}
+
 interface HealthStatus {
   status: 'healthy' | 'unhealthy';
   timestamp: string;
@@ -64,7 +89,10 @@ export function recordRpcCall(success: boolean, latency: number): void {
  */
 export function createHealthServer() {
   const client = createPublicClient({
-    transport: viemHttp(config.RPC_URL),
+    transport: viemHttp(config.RPC_URL, {
+      timeout: 10_000, // 10秒超时，防止RPC挂起
+      retryCount: 0,   // 禁用内置重试，我们自己控制
+    }),
   });
 
   const server = http.createServer(async (req, res) => {
@@ -76,10 +104,27 @@ export function createHealthServer() {
 
     if (pathname === '/healthz') {
       try {
+        // Check cache first
+        const now = Date.now();
+        if (healthCache && (now - healthCache.timestamp < CACHE_TTL_MS)) {
+          const cachedStatus = healthCache.data.status;
+          const statusCode = cachedStatus === 'healthy' ? 200 : 503;
+          res.writeHead(statusCode);
+          res.end(safeJSONStringify({
+            ...healthCache.data,
+            cached: true,
+            cachedSecondsAgo: Math.round((now - healthCache.timestamp) / 1000),
+          }, 2));
+          return;
+        }
+
         const health = await getHealthStatus(client);
+        // Update cache
+        healthCache = { data: health, timestamp: now };
+
         const statusCode = health.status === 'healthy' ? 200 : 503;
         res.writeHead(statusCode);
-        res.end(JSON.stringify(health, null, 2));
+        res.end(safeJSONStringify({ ...health, cached: false }, 2));
       } catch (error) {
         logger.error({ error }, 'Health check failed');
         res.writeHead(503);
@@ -92,7 +137,7 @@ export function createHealthServer() {
       try {
         const metrics = await getMetrics(client);
         res.writeHead(200);
-        res.end(JSON.stringify(metrics, null, 2));
+        res.end(safeJSONStringify(metrics, 2));
       } catch (error) {
         logger.error({ error }, 'Metrics collection failed');
         res.writeHead(500);

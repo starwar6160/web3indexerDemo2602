@@ -144,7 +144,10 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
 
   // RPC client for chain head
   const rpcClient = createPublicClient({
-    transport: http(finalConfig.rpcUrl),
+    transport: http(finalConfig.rpcUrl, {
+      timeout: 10_000, // 10秒超时
+      retryCount: 0,
+    }),
   });
 
   // Swagger API Documentation

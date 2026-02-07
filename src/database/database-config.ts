@@ -306,7 +306,15 @@ export class ConnectionManager {
 let defaultManager: ConnectionManager | null = null;
 
 export async function createDbConnection(connectionUrl?: string): Promise<Kysely<Database>> {
-  const url = connectionUrl || process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:15432/web3_indexer';
+  const url = connectionUrl || process.env.DATABASE_URL;
+  
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL environment variable is required. ' +
+      'In Docker: postgresql://user:pass@postgres:5432/dbname ' +
+      'In local: postgresql://user:pass@localhost:5432/dbname'
+    );
+  }
   
   if (!defaultManager) {
     defaultManager = ConnectionManager.getInstance(url, 'default');

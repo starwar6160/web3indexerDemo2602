@@ -40,7 +40,14 @@
     "test:api": "vitest run tests/api",
     "test:reorg": "vitest run tests/integration/reorg.test.ts",
     "test:coverage": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "chaos": "npx ts-node scripts/chaos/run-chaos-tests.ts",
+    "chaos:all": "npx ts-node scripts/chaos/run-chaos-tests.ts",
+    "chaos:reorg": "npx ts-node scripts/chaos/reorg-exploder.ts",
+    "chaos:toxic": "npx ts-node scripts/chaos/toxic-rpc-proxy.ts",
+    "chaos:bigint": "npx ts-node scripts/chaos/bigint-nuke.ts",
+    "chaos:db": "npx ts-node scripts/chaos/db-killer.ts",
+    "chaos:list": "npx ts-node scripts/chaos/run-chaos-tests.ts --list"
   },
   "dependencies": {
     "@types/pg": "^8.16.0",

@@ -1,3 +1,22 @@
+# Dependencies
 node_modules
-logs/
+
+# Build outputs
 dist/
+
+# Logs
+logs/
+
+# Environment variables (keep local config private)
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/

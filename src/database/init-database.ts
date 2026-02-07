@@ -20,13 +20,13 @@ export async function initDatabase(): Promise<void> {
 
       await db.schema
         .createTable('blocks')
-        .addColumn('number', 'bigint', (col) =>
-          col.notNull().primaryKey()
-        )
+        .addColumn('chain_id', 'bigint', (col) => col.notNull())
+        .addColumn('number', 'bigint', (col) => col.notNull())
+        .addPrimaryKeyConstraint('blocks_pkey', ['chain_id', 'number'])
         .addColumn('hash', 'varchar(66)', (col) =>
           col.notNull().unique()
         )
-        .addColumn('timestamp', 'integer', (col) =>
+        .addColumn('timestamp', 'bigint', (col) =>
           col.notNull()
         )
         .addColumn('parent_hash', 'varchar(66)', (col) =>
@@ -141,7 +141,9 @@ export async function initDatabase(): Promise<void> {
       await db.schema
         .createTable('transfers')
         .addColumn('id', 'serial', (col) => col.primaryKey())
-        .addColumn('block_number', 'bigint', (col) => col.notNull())
+        .addColumn('block_number', 'bigint', (col) =>
+          col.notNull().references('blocks.number').onDelete('cascade')
+        )
         .addColumn('transaction_hash', 'varchar(66)', (col) => col.notNull())
         .addColumn('log_index', 'integer', (col) => col.notNull())
         .addColumn('from_address', 'varchar(42)', (col) => col.notNull())
@@ -187,7 +189,15 @@ export async function initDatabase(): Promise<void> {
         .column('transaction_hash')
         .execute();
 
-      console.log('[INIT] ✅ Transfers table created with indexes');
+      // Add unique constraint for idempotency
+      await db.schema
+        .createIndex('idx_transfers_block_log_unique')
+        .on('transfers')
+        .columns(['block_number', 'log_index'])
+        .unique()
+        .execute();
+
+      console.log('[INIT] ✅ Transfers table created with unique constraint');
     } catch (error) {
       console.log('[INIT] Transfers table already exists');
     }

@@ -27,7 +27,7 @@ const client = createPublicClient({
 let blockRepository: BlockRepository;
 // Global state with proper cleanup tracking
 let isRunning = true;
-let healthServerInstance: ReturnType<typeof startHealthServer> | null = null;
+let healthServerInstance: any = null;
 
 // Rate limiter: 10 requests per second with burst of 20
 const rateLimiter = new TokenBucketRateLimiter({

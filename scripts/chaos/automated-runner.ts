@@ -314,12 +314,38 @@ async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string
     // CRITICAL: Merge testEnv with process.env to preserve all environment variables
     const execEnv = { ...process.env, ...testEnv };
 
-    execSync(`npx ts-node --transpile-only ${test.file}`, {
-      stdio: 'inherit',
-      env: execEnv,  // Use merged environment
-    });
+    // Special handling for toxic-rpc: run in automated mode
+    if (test.name === 'toxic-rpc') {
+      console.log('☠️  Starting toxic-rpc proxy in automated mode (30s)...\n');
 
-    console.log('\n✅ Chaos test execution completed\n');
+      // Run toxic-rpc in background with --automated --duration=30000 flags
+      const toxicProc = spawn('npx', ['ts-node', '--transpile-only', test.file, '--automated', '--duration=30000'], {
+        env: execEnv,
+        stdio: 'inherit',
+        detached: false,
+      });
+
+      // Wait for automated test to complete (30s + 5s buffer)
+      await sleep(35000);
+
+      // Kill the process if still running
+      if (toxicProc.pid && !toxicProc.killed) {
+        toxicProc.kill('SIGTERM');
+        await sleep(1000);
+        if (!toxicProc.killed) {
+          toxicProc.kill('SIGKILL');
+        }
+      }
+
+      console.log('\n✅ Toxic RPC proxy test completed\n');
+    } else {
+      execSync(`npx ts-node --transpile-only ${test.file}`, {
+        stdio: 'inherit',
+        env: execEnv,  // Use merged environment
+      });
+
+      console.log('\n✅ Chaos test execution completed\n');
+    }
 
   } catch (error) {
     console.error('\n❌ Chaos test execution failed\n');

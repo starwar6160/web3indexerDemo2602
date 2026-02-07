@@ -97,6 +97,9 @@ export class TransfersRepository {
           token_address: t.token_address,
         }))
       )
+      .onConflict((oc) =>
+        oc.columns(['block_number', 'log_index']).doNothing()
+      )
       .execute();
 
     return transfers.length;

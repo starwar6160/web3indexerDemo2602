@@ -18,6 +18,12 @@ export class ConnectionManager {
   private connectionUrl: string;
   private instanceId: string;
   private isShuttingDown = false;
+  // M5 Fix: Health check tracking
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private lastHealthCheck = Date.now();
+  private consecutiveFailures = 0;
+  private readonly MAX_CONSECUTIVE_FAILURES = 3;
+  private readonly HEALTH_CHECK_INTERVAL_MS = 30000; // 30 seconds
 
   constructor(connectionUrl: string, instanceId?: string) {
     this.connectionUrl = connectionUrl;
@@ -87,7 +93,92 @@ export class ConnectionManager {
       throw new Error(`Database connection test failed: ${error}`);
     }
 
+    // M5 Fix: Start periodic health check
+    this.startHealthCheck();
+
     return this.db;
+  }
+
+  /**
+   * M5 Fix: Start periodic health check
+   * Monitors connection health and attempts recovery on failure
+   */
+  private startHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      return;
+    }
+
+    this.healthCheckInterval = setInterval(async () => {
+      if (this.isShuttingDown) {
+        return;
+      }
+
+      const isHealthy = await this.healthCheck();
+      this.lastHealthCheck = Date.now();
+
+      if (!isHealthy) {
+        this.consecutiveFailures++;
+        console.warn(
+          `[ConnectionManager] Health check failed (${this.consecutiveFailures}/${this.MAX_CONSECUTIVE_FAILURES}) for ${this.instanceId}`
+        );
+
+        if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+          console.error(
+            `[ConnectionManager] Max consecutive failures reached. Attempting recovery...`
+          );
+          await this.attemptRecovery();
+        }
+      } else {
+        if (this.consecutiveFailures > 0) {
+          console.log(`[ConnectionManager] Health check recovered for ${this.instanceId}`);
+        }
+        this.consecutiveFailures = 0;
+      }
+    }, this.HEALTH_CHECK_INTERVAL_MS);
+
+    console.log(`[ConnectionManager] Health check started (${this.HEALTH_CHECK_INTERVAL_MS}ms)`);
+  }
+
+  /**
+   * M5 Fix: Stop periodic health check
+   */
+  private stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
+   * M5 Fix: Attempt to recover connection
+   */
+  private async attemptRecovery(): Promise<void> {
+    try {
+      console.log(`[ConnectionManager] Attempting connection recovery...`);
+      
+      // Destroy existing connection
+      const wasDb = this.db;
+      const wasPool = this.pool;
+      
+      this.db = null;
+      this.pool = null;
+      
+      if (wasDb) {
+        try {
+          await wasDb.destroy();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+
+      // Reconnect
+      await this.connect();
+      this.consecutiveFailures = 0;
+      console.log(`[ConnectionManager] ✅ Connection recovered successfully`);
+    } catch (error) {
+      console.error(`[ConnectionManager] Connection recovery failed:`, error);
+      // Keep consecutiveFailures high to trigger retry on next interval
+    }
   }
 
   /**
@@ -130,6 +221,9 @@ export class ConnectionManager {
 
     this.isShuttingDown = true;
     console.log(`[ConnectionManager] Closing connection pool (${this.instanceId})`);
+
+    // M5 Fix: Stop health check
+    this.stopHealthCheck();
 
     if (this.db) {
       await this.db.destroy();

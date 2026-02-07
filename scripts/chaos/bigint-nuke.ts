@@ -27,8 +27,13 @@ import { privateKeyToAccount } from 'viem/accounts';
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
-// SimpleBank ABI for deposit()
+// SimpleBank ABI
 const SIMPLE_BANK_ABI = [
+  {
+    type: 'constructor',
+    inputs: [],
+    stateMutability: 'nonpayable'
+  },
   {
     type: 'function',
     name: 'deposit',
@@ -36,6 +41,34 @@ const SIMPLE_BANK_ABI = [
     inputs: [],
     outputs: []
   },
+  {
+    type: 'function',
+    name: 'withdraw',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: []
+  },
+  {
+    type: 'function',
+    name: 'transfer',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    outputs: []
+  },
+  {
+    type: 'event',
+    name: 'Transfer',
+    inputs: [
+      { name: 'from', type: 'address', indexed: true },
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'timestamp', type: 'uint256', indexed: false }
+    ],
+    anonymous: false
+  }
 ] as const;
 
 // SimpleBank bytecode

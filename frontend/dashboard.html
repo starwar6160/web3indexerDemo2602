@@ -34,6 +34,7 @@
       color: var(--text-primary);
       min-height: 100vh;
       padding: 24px;
+      padding-bottom: 80px; /* Space for fixed footer */
       line-height: 1.6;
       letter-spacing: -0.02em;
     }
@@ -346,14 +347,20 @@
 
     /* Footer */
     .footer {
-      margin-top: 40px;
-      padding-top: 20px;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-secondary);
       border-top: 1px solid var(--border-color);
+      padding: 15px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 12px;
       color: var(--text-secondary);
+      z-index: 1000;
+      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
     }
 
     .footer-links {

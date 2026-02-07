@@ -49,22 +49,25 @@ export class CheckpointRepository {
    * This approach is 100% reliable and avoids the "non-string identifier" compilation error
    */
   async saveCheckpoint(checkpoint: Omit<Checkpoint, 'id' | 'synced_at'>): Promise<void> {
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
 
     // Step 1: Try to update existing record
+    // Note: For update, Kysely expects the "Update" type from ColumnType (Date, Record)
     const updateResult = await this.db
       .updateTable('sync_checkpoints')
       .set({
         block_number: checkpoint.block_number,
         block_hash: checkpoint.block_hash,
         synced_at: now,
-        metadata: checkpoint.metadata ? JSON.stringify(checkpoint.metadata) : null,
+        metadata: checkpoint.metadata ?? null,
         updated_at: now
       })
       .where('name', '=', checkpoint.name)
       .executeTakeFirst();
 
     // Step 2: If no rows were updated, insert new record
+    // Note: For insert, Kysely expects the "Insert" type from ColumnType (string, string)
     if (Number(updateResult.numUpdatedRows) === 0) {
       await this.db
         .insertInto('sync_checkpoints')
@@ -72,10 +75,10 @@ export class CheckpointRepository {
           name: checkpoint.name,
           block_number: checkpoint.block_number,
           block_hash: checkpoint.block_hash,
-          synced_at: now,
+          synced_at: nowIso,
           metadata: checkpoint.metadata ? JSON.stringify(checkpoint.metadata) : null,
-          created_at: now,
-          updated_at: now
+          created_at: nowIso,
+          updated_at: nowIso
         })
         .execute();
     }
@@ -95,13 +98,27 @@ export class CheckpointRepository {
       return null;
     }
 
+    // Handle metadata that may be already an object or a JSON string
+    let parsedMetadata: Record<string, unknown> | undefined;
+    if (result.metadata) {
+      if (typeof result.metadata === 'string') {
+        try {
+          parsedMetadata = JSON.parse(result.metadata) as Record<string, unknown>;
+        } catch {
+          parsedMetadata = undefined;
+        }
+      } else if (typeof result.metadata === 'object') {
+        parsedMetadata = result.metadata as Record<string, unknown>;
+      }
+    }
+
     return {
       id: result.id,
       name: result.name,
       block_number: BigInt(result.block_number),
       block_hash: result.block_hash,
       synced_at: result.synced_at instanceof Date ? result.synced_at.toISOString() : result.synced_at,
-      metadata: result.metadata ? JSON.parse(String(result.metadata)) : undefined,
+      metadata: parsedMetadata,
     };
   }
 
@@ -120,13 +137,27 @@ export class CheckpointRepository {
       return null;
     }
 
+    // Handle metadata that may be already an object or a JSON string
+    let parsedMetadata: Record<string, unknown> | undefined;
+    if (result.metadata) {
+      if (typeof result.metadata === 'string') {
+        try {
+          parsedMetadata = JSON.parse(result.metadata) as Record<string, unknown>;
+        } catch {
+          parsedMetadata = undefined;
+        }
+      } else if (typeof result.metadata === 'object') {
+        parsedMetadata = result.metadata as Record<string, unknown>;
+      }
+    }
+
     return {
       id: result.id,
       name: result.name,
       block_number: BigInt(result.block_number),
       block_hash: result.block_hash,
       synced_at: result.synced_at instanceof Date ? result.synced_at.toISOString() : result.synced_at,
-      metadata: result.metadata ? JSON.parse(String(result.metadata)) : undefined,
+      metadata: parsedMetadata,
     };
   }
 

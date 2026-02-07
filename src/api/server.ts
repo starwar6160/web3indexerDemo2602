@@ -186,16 +186,30 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
           .executeTakeFirst(),
       ]);
 
-      const lag = chainHead && localMaxBlock !== null
+      // Defensive calculation: prevent negative lag and overflow
+      const rawLag = chainHead && localMaxBlock !== null
         ? Number(chainHead - localMaxBlock)
         : null;
 
-      const syncPercentage = chainHead && localMaxBlock !== null && chainHead > 0n
-        ? ((Number(localMaxBlock) / Number(chainHead)) * 100).toFixed(2)
-        : '0.00';
+      // Enforce physical constraint: lag cannot be negative
+      const lag = rawLag !== null ? Math.max(0, rawLag) : null;
+
+      // Defensive calculation: cap sync percentage at 100%
+      let syncPercentage = '0.00';
+      if (chainHead && localMaxBlock !== null && chainHead > 0n) {
+        const rawPercentage = (Number(localMaxBlock) / Number(chainHead)) * 100;
+        syncPercentage = Math.min(100, Math.max(0, rawPercentage)).toFixed(2);
+      }
+
+      // Detect environment mismatch (indexed height exceeds chain head)
+      const isEnvironmentMismatch = rawLag !== null && rawLag < 0;
 
       const status = {
-        status: dbHealth ? (lag !== null && lag <= 5 ? 'synchronized' : 'syncing') : 'error',
+        status: dbHealth
+          ? (isEnvironmentMismatch
+            ? 'environment_mismatch'
+            : (lag !== null && lag <= 5 ? 'synchronized' : 'syncing'))
+          : 'error',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         sync: {

@@ -703,11 +703,11 @@
 
         if (lag <= 5) {
           lagElement.className = 'metric-value lag-good';
-          lagStatus.textContent = 'Excellent';
+          lagStatus.textContent = 'Synchronized';
           lagStatus.className = 'metric-sub lag-good';
         } else if (lag <= 50) {
           lagElement.className = 'metric-value lag-warning';
-          lagStatus.textContent = 'Catching up';
+          lagStatus.textContent = 'Syncing';
           lagStatus.className = 'metric-sub lag-warning';
         } else {
           lagElement.className = 'metric-value lag-critical';

@@ -150,14 +150,30 @@ export class CheckpointRepository {
       .orderBy('block_number', 'desc')
       .execute();
 
-    return results.map(r => ({
-      id: r.id,
-      name: r.name,
-      block_number: BigInt(r.block_number),
-      block_hash: r.block_hash,
-      synced_at: r.synced_at instanceof Date ? r.synced_at.toISOString() : r.synced_at,
-      metadata: r.metadata ? JSON.parse(String(r.metadata)) : undefined,
-    }));
+    return results.map(r => {
+      // Handle metadata that may be already an object or a JSON string
+      let parsedMetadata: Record<string, unknown> | undefined;
+      if (r.metadata) {
+        if (typeof r.metadata === 'string') {
+          try {
+            parsedMetadata = JSON.parse(r.metadata) as Record<string, unknown>;
+          } catch {
+            parsedMetadata = undefined;
+          }
+        } else if (typeof r.metadata === 'object') {
+          parsedMetadata = r.metadata as Record<string, unknown>;
+        }
+      }
+
+      return {
+        id: r.id,
+        name: r.name,
+        block_number: BigInt(r.block_number),
+        block_hash: r.block_hash,
+        synced_at: r.synced_at instanceof Date ? r.synced_at.toISOString() : r.synced_at,
+        metadata: parsedMetadata,
+      };
+    });
   }
 
   /**

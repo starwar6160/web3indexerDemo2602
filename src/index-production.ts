@@ -102,21 +102,23 @@ async function initializeDatabase(): Promise<void> {
     try {
       await blockRepository.getBlockCount();
       logger.info('✅ Database tables already exist');
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 🟣 Fix R2: Check specific error before assuming table doesn't exist
       // Problem: Any error (e.g., connection lost, permission denied) is assumed to be
       // "table not found", leading to attempting table creation on a potentially
       // more serious problem
       // Solution: Check error code for specific "table not found" error (PostgreSQL 42P01)
-      const isTableNotFoundError = error?.code === '42P01' ||
-        error?.message?.includes('does not exist') ||
-        error?.message?.includes('relation');
+      const errorCode = error instanceof Error && 'code' in error ? (error as { code: string }).code : null;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTableNotFoundError = errorCode === '42P01' ||
+        errorMessage.includes('does not exist') ||
+        errorMessage.includes('relation');
 
       if (!isTableNotFoundError) {
         // This is NOT a "table not found" error - it's something more serious
         logger.error({ error }, '❌ Database query failed (not a missing table error)');
         throw new Error(
-          `Database initialization failed: ${error?.message || error}. ` +
+          `Database initialization failed: ${errorMessage}. ` +
           `This is not a missing table error - check database connectivity and permissions.`
         );
       }
@@ -302,10 +304,12 @@ async function syncBlockBatch(
       }
 
       // Sort blocks by number to ensure correct order for continuity check
-      rawBlocks.sort((a: any, b: any) => {
+      rawBlocks.sort((a: unknown, b: unknown) => {
         if (a && typeof a === 'object' && 'number' in a &&
             b && typeof b === 'object' && 'number' in b) {
-          return Number(a.number) - Number(b.number);
+          const aNum = BigInt((a as { number: string | number | bigint }).number);
+          const bNum = BigInt((b as { number: string | number | bigint }).number);
+          return aNum < bNum ? -1 : aNum > bNum ? 1 : 0;
         }
         return 0;
       });

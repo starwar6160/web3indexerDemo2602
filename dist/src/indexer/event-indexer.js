@@ -115,12 +115,12 @@ class EventIndexer {
      */
     transformToTransactions(events) {
         return events
-            .filter((e) => e.eventName === 'Deposit') // Only index deposits for now
+            .filter((e) => e.eventName === 'Transfer') // Index Transfer events (called by demo script)
             .map((event) => ({
             tx_hash: event.txHash,
             block_number: event.blockNumber,
             from_address: String(event.args.from || '0x0'),
-            to_address: this.contractAddress,
+            to_address: String(event.args.to || '0x0'),
             value: String(event.args.amount || '0'),
             gas_price: null,
             gas_used: null,

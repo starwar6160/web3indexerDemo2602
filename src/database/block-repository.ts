@@ -74,7 +74,7 @@ export class BlockRepository {
     // DEMO MODE: Simplified batch insert without onConflict to avoid Kysely bug
     // For production, we should restore the upsert logic after fixing the Kysely identifier issue
     const saved = await this.db.transaction().execute(async (trx) => {
-      const results: any[] = [];
+      const results: Block[] = [];
 
       for (const block of dbBlocks) {
         // Simple insert (no upsert for demo)

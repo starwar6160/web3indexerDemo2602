@@ -1,5 +1,7 @@
 import { getDb } from './database-config';
-import { sql } from 'kysely';
+import { sql, type Transaction } from 'kysely';
+import type { TransferDTO } from '../schemas/transfer.schema';
+import type { Database } from './database-types';
 
 /**
  * Transfer event data structure (ERC20 Transfer)
@@ -74,15 +76,14 @@ export class TransfersRepository {
    * Save transfers within a transaction (atomic with block write)
    * CRITICAL: Must be called within same trx as blockRepository.saveWithTrx
    *
-   * DEMO MODE: Simplified insert without onConflict to avoid Kysely bug
+   * Zod Validated: Accepts only TransferDTO from Zod schema validation
    */
   async saveWithTrx(
-    trx: any,
-    transfers: Omit<Transfer, 'id' | 'created_at'>[]
+    trx: Transaction<Database>,
+    transfers: TransferDTO[]
   ): Promise<number> {
     if (transfers.length === 0) return 0;
 
-    // DEMO MODE: Direct insert (no upsert)
     await trx
       .insertInto('transfers')
       .values(
@@ -134,22 +135,22 @@ export class TransfersRepository {
       from_address: r.from_address,
       to_address: r.to_address,
       amount: r.amount,
-      token_address: (r as any).token_address || r.contract_address,
+      token_address: r.token_address,
       created_at: r.created_at,
     }));
   }
 
   /**
-   * Get transfers by contract address
+   * Get transfers by token address
    */
   async getByContract(
-    contractAddress: string,
+    tokenAddress: string,
     limit: number = 100
   ): Promise<Transfer[]> {
     const results = await this.db
       .selectFrom('transfers')
       .selectAll()
-      .where('contract_address', '=', contractAddress)
+      .where('token_address', '=', tokenAddress)
       .orderBy('block_number', 'desc')
       .limit(limit)
       .execute();
@@ -162,7 +163,7 @@ export class TransfersRepository {
       from_address: r.from_address,
       to_address: r.to_address,
       amount: r.amount,
-      token_address: (r as any).token_address || r.contract_address,
+      token_address: r.token_address,
       created_at: r.created_at,
     }));
   }

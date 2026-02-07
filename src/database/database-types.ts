@@ -82,7 +82,7 @@ export interface TransfersTable {
   from_address: string;
   to_address: string;
   amount: ColumnType<string, string, string>; // DECIMAL(78,18)
-  contract_address: string;
+  token_address: string;
   created_at: ColumnType<Date, string | undefined, Date>;
 }
 

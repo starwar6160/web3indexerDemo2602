@@ -1,11 +1,12 @@
 import { getDb } from './database-config';
-import { sql } from 'kysely';
+import { sql, type Transaction as KyselyTransaction } from 'kysely';
+import type { Database } from './database-types';
 
 /**
  * Transaction data structure for decoded events
  * Phase 3: Event parsing core logic
  */
-export interface Transaction {
+export interface BlockchainTransaction {
   id?: number;
   tx_hash: string;
   block_number: bigint;
@@ -62,7 +63,7 @@ export class TransactionRepository {
    * Save transaction with idempotent upsert
    * Phase 4: Ensures duplicate events don't create duplicate records
    */
-  async saveTransaction(tx: Omit<Transaction, 'id' | 'created_at'>): Promise<void> {
+  async saveTransaction(tx: Omit<BlockchainTransaction, 'id' | 'created_at'>): Promise<void> {
     await this.db
       .insertInto('transactions')
       .values({
@@ -93,7 +94,7 @@ export class TransactionRepository {
   /**
    * Save multiple transactions within a transaction
    */
-  async saveManyWithTrx(trx: any, txs: Transaction[]): Promise<void> {
+  async saveManyWithTrx(trx: KyselyTransaction<Database>, txs: BlockchainTransaction[]): Promise<void> {
     if (txs.length === 0) return;
 
     await trx
@@ -110,7 +111,7 @@ export class TransactionRepository {
           status: tx.status,
         }))
       )
-      .onConflict((oc: any) =>
+      .onConflict((oc) =>
         oc.columns(['block_number', 'tx_hash']).doNothing()
       )
       .execute();
@@ -119,7 +120,7 @@ export class TransactionRepository {
   /**
    * Get transaction by hash
    */
-  async getByHash(txHash: string): Promise<Transaction | null> {
+  async getByHash(txHash: string): Promise<BlockchainTransaction | null> {
     const result = await this.db
       .selectFrom('transactions')
       .selectAll()
@@ -145,7 +146,7 @@ export class TransactionRepository {
   /**
    * Get transactions by block number
    */
-  async getByBlockNumber(blockNumber: bigint): Promise<Transaction[]> {
+  async getByBlockNumber(blockNumber: bigint): Promise<BlockchainTransaction[]> {
     const results = await this.db
       .selectFrom('transactions')
       .selectAll()

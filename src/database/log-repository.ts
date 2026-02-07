@@ -1,5 +1,6 @@
 import { getDb } from './database-config';
-import { sql } from 'kysely';
+import { sql, type Transaction } from 'kysely';
+import type { Database } from './database-types';
 
 /**
  * Transaction log data structure
@@ -54,7 +55,7 @@ export class LogRepository {
    *
    * CRITICAL: This must be called within the same transaction as block write
    */
-  async saveManyWithTrx(trx: any, logs: TransactionLog[]): Promise<void> {
+  async saveManyWithTrx(trx: Transaction<Database>, logs: TransactionLog[]): Promise<void> {
     if (logs.length === 0) return;
 
     const now = new Date().toISOString();
@@ -72,9 +73,9 @@ export class LogRepository {
           created_at: now,
         }))
       )
-      .onConflict((oc: any) =>
+      .onConflict((oc) =>
         oc
-          .column(['block_number', 'log_index'])
+          .columns(['block_number', 'log_index'])
           .doNothing()
       )
       .execute();
@@ -91,7 +92,7 @@ export class LogRepository {
       .orderBy('log_index', 'asc')
       .execute();
 
-    return result.map((row: any) => ({
+    return result.map((row) => ({
       log_index: row.log_index,
       transaction_hash: row.transaction_hash,
       block_number: BigInt(row.block_number),

@@ -147,7 +147,7 @@ export class TokenBucketRateLimiter {
 /**
  * Create a rate-limited wrapper for async functions
  */
-export function withRateLimit<T extends (...args: any[]) => Promise<any>>(
+export function withRateLimit<T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   rateLimiter: TokenBucketRateLimiter,
   tokens: number = 1

@@ -19,6 +19,29 @@ const TOKEN_CONTRACT_ADDRESS = process.env.TOKEN_CONTRACT_ADDRESS; // ERC20 toke
 const INSTANCE_ID = process.env.INSTANCE_ID || randomUUID(); // Unique instance identifier
 
 let isRunning = true;
+let isSyncing = false; // Track if a sync operation is in progress
+let shutdownResolver: (() => void) | null = null;
+
+/**
+ * Wait for current sync operation to complete
+ */
+async function waitForSyncCompletion(timeoutMs = 30000): Promise<void> {
+  if (!isSyncing) return;
+
+  console.log(`[${new Date().toISOString()}] ⏳ Waiting for current sync to complete (timeout: ${timeoutMs}ms)...`);
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      console.warn(`[${new Date().toISOString()}] ⚠️ Sync completion timeout reached, forcing shutdown`);
+      resolve();
+    }, timeoutMs);
+
+    shutdownResolver = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+  });
+}
 
 async function main(): Promise<void> {
   console.log(`[${new Date().toISOString()}] 🚀 Starting Enhanced Web3 Block Indexer`);
@@ -131,7 +154,15 @@ async function main(): Promise<void> {
 
   while (isRunning) {
     try {
+      isSyncing = true;
       await syncEngine.syncToTip();
+      isSyncing = false;
+
+      // Notify shutdown if waiting
+      if (shutdownResolver) {
+        shutdownResolver();
+        shutdownResolver = null;
+      }
 
       // Update checkpoint periodically
       const latestBlock = await syncEngine['blockRepository'].getMaxBlockNumber();
@@ -156,6 +187,12 @@ async function main(): Promise<void> {
       // Wait for next poll
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
     } catch (error) {
+      isSyncing = false;
+      if (shutdownResolver) {
+        shutdownResolver();
+        shutdownResolver = null;
+      }
+
       consecutiveErrors++;
 
       console.error(
@@ -230,12 +267,23 @@ process.on('SIGINT', async () => {
   console.log(JSON.stringify({
     level: 'INFO',
     timestamp,
-    message: 'Received SIGINT. Shutting down gracefully.',
+    message: 'Received SIGINT. Initiating graceful shutdown...',
     instanceId: INSTANCE_ID,
+    isSyncing,
   }));
 
   isRunning = false;
+
+  // Wait for current sync to complete (max 30s)
+  await waitForSyncCompletion(30000);
+
   await closeDbConnection();
+  console.log(JSON.stringify({
+    level: 'INFO',
+    timestamp: new Date().toISOString(),
+    message: 'Graceful shutdown complete',
+    instanceId: INSTANCE_ID,
+  }));
   process.exit(0);
 });
 
@@ -244,12 +292,23 @@ process.on('SIGTERM', async () => {
   console.log(JSON.stringify({
     level: 'INFO',
     timestamp,
-    message: 'Received SIGTERM. Shutting down gracefully.',
+    message: 'Received SIGTERM. Initiating graceful shutdown...',
     instanceId: INSTANCE_ID,
+    isSyncing,
   }));
 
   isRunning = false;
+
+  // Wait for current sync to complete (max 30s)
+  await waitForSyncCompletion(30000);
+
   await closeDbConnection();
+  console.log(JSON.stringify({
+    level: 'INFO',
+    timestamp: new Date().toISOString(),
+    message: 'Graceful shutdown complete',
+    instanceId: INSTANCE_ID,
+  }));
   process.exit(0);
 });
 

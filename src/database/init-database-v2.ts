@@ -35,8 +35,9 @@ export async function initDatabaseV2(): Promise<void> {
         .execute();
 
       console.log('[INIT V2] ✅ Transactions table created');
-    } catch (error: any) {
-      if (error.code === '42P07') {
+    } catch (error: unknown) {
+      const pgError = error as { code?: string };
+      if (pgError.code === '42P07') {
         console.log('[INIT V2] ✅ Transactions table already exists');
       } else {
         throw error;
@@ -93,8 +94,9 @@ export async function initDatabaseV2(): Promise<void> {
         .execute();
 
       console.log('[INIT V2] ✅ Sync status table created');
-    } catch (error: any) {
-      if (error.code === '42P07') {
+    } catch (error: unknown) {
+      const pgError = error as { code?: string };
+      if (pgError.code === '42P07') {
         console.log('[INIT V2] ✅ Sync status table already exists');
       } else {
         throw error;

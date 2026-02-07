@@ -114,7 +114,7 @@ class TransfersRepository {
             from_address: r.from_address,
             to_address: r.to_address,
             amount: r.amount,
-            token_address: r.token_address,
+            token_address: r.token_address || r.contract_address,
             created_at: r.created_at,
         }));
     }
@@ -137,7 +137,7 @@ class TransfersRepository {
             from_address: r.from_address,
             to_address: r.to_address,
             amount: r.amount,
-            token_address: r.token_address,
+            token_address: r.token_address || r.contract_address,
             created_at: r.created_at,
         }));
     }

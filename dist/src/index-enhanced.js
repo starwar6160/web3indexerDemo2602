@@ -12,6 +12,7 @@ const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '100'); // 100 blocks per 
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES || '3');
 const CONFIRMATION_DEPTH = parseInt(process.env.CONFIRMATION_DEPTH || '12'); // P5 Fix: Default 12 blocks (~2 min on Ethereum)
 const CONCURRENCY = parseInt(process.env.CONCURRENCY || '10'); // P1 Fix: Parallel fetch concurrency
+const TOKEN_CONTRACT_ADDRESS = process.env.TOKEN_CONTRACT_ADDRESS; // ERC20 token to monitor for Transfer events
 const INSTANCE_ID = process.env.INSTANCE_ID || (0, crypto_1.randomUUID)(); // Unique instance identifier
 let isRunning = true;
 async function main() {
@@ -23,6 +24,7 @@ async function main() {
     console.log(`[${new Date().toISOString()}] Max retries: ${MAX_RETRIES}`);
     console.log(`[${new Date().toISOString()}] Confirmation depth: ${CONFIRMATION_DEPTH} (P5 Fix: prevents reorg storms)`);
     console.log(`[${new Date().toISOString()}] Concurrency: ${CONCURRENCY} (P1 Fix: parallel fetch)`);
+    console.log(`[${new Date().toISOString()}] Token contract: ${TOKEN_CONTRACT_ADDRESS || 'None (Transfer event indexing disabled)'}`);
     // Initialize database
     console.log(`[${new Date().toISOString()}] Initializing database...`);
     await (0, database_config_1.createDbConnection)();
@@ -44,6 +46,8 @@ async function main() {
         confirmationDepth: CONFIRMATION_DEPTH,
         concurrency: CONCURRENCY, // P1 Fix
         rpcTimeout: 30000, // P4 Fix: 30s timeout
+        fetchLogs: true, // Enable Transfer event fetching
+        tokenContract: TOKEN_CONTRACT_ADDRESS, // ERC20 token contract to monitor
     });
     // Check for existing checkpoint
     const checkpoint = await checkpointRepo.getLatestCheckpoint();

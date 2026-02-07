@@ -1,8 +1,10 @@
 import { createPublicClient, http, Block, Log, decodeEventLog, type Address } from 'viem';
+import { z } from 'zod';
 import { BlockRepository } from './database/block-repository';
 import { LogRepository, TransactionLog } from './database/log-repository';
 import { TransfersRepository, type Transfer } from './database/transfers-repository';
 import { validateBlocks, toDbBlock, ValidatedBlock } from './database/schemas';
+import { TransferSchema, TransferDTO } from './schemas/transfer.schema';
 import { sql } from 'kysely';
 import pLimit from 'p-limit';
 
@@ -127,7 +129,7 @@ export class SyncEngine {
         toBlock,
       });
 
-      return logs.map((log) => {
+      const transfers = logs.map((log) => {
         const decoded = decodeEventLog({
           abi: simpleBankTransferAbi,
           data: log.data,
@@ -141,9 +143,26 @@ export class SyncEngine {
           from_address: String(decoded.args?.from || '0x0'),
           to_address: String(decoded.args?.to || '0x0'),
           amount: String(decoded.args?.amount || '0'),
-          contract_address: this.config.tokenContract!,
+          token_address: this.config.tokenContract!,
         };
       });
+
+      // Validate with Zod - fail fast on field mismatch or invalid data
+      const validatedTransfers: TransferDTO[] = [];
+      for (const [index, rawTransfer] of transfers.entries()) {
+        try {
+          const validated = TransferSchema.parse(rawTransfer);
+          validatedTransfers.push(validated);
+        } catch (error) {
+          console.error(`[SyncEngine] ❌ Transfer validation failed at index ${index}:`, error);
+          console.error(`[SyncEngine] Raw data:`, JSON.stringify(rawTransfer, (_, v) =>
+            typeof v === 'bigint' ? v.toString() : v
+          ));
+          throw new Error(`Transfer data validation failed at index ${index}: ${error}`);
+        }
+      }
+
+      return validatedTransfers;
     } catch (error) {
       console.error('[SyncEngine] Failed to fetch Transfer events:', error);
       throw new Error(`Event fetch failed: ${error}`);
@@ -375,7 +394,7 @@ export class SyncEngine {
             updated_at: now,
           })
           .onConflict((oc) => oc
-            .column(['chain_id', 'number'])
+            .columns(['chain_id', 'number'])
             .doUpdateSet({
               hash: block.hash,
               parent_hash: block.parent_hash,

@@ -13,16 +13,15 @@ const zod_1 = require("zod");
 const kysely_1 = require("kysely");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const path_1 = __importDefault(require("path"));
-const url_1 = require("url");
+const fs_1 = require("fs");
+const database_config_1 = require("../database/database-config");
 const block_repository_1 = require("../database/block-repository");
 const transfers_repository_1 = require("../database/transfers-repository");
 const sync_status_repository_1 = require("../database/sync-status-repository");
-const database_config_1 = require("../database/database-config");
+const database_config_2 = require("../database/database-config");
 const logger_1 = __importDefault(require("../utils/logger"));
 const metrics_collector_1 = require("../utils/metrics-collector");
 const swagger_1 = require("./swagger");
-const __filename = (0, url_1.fileURLToPath)(import.meta.url);
-const __dirname = path_1.default.dirname(__filename);
 /**
  * BigInt-safe JSON serializer
  * CRITICAL: Prevents 2^53 precision loss by converting BigInt to string
@@ -115,8 +114,6 @@ function createApiServer(config = {}) {
     }
     app.use(bigIntSafeJsonMiddleware());
     app.use(express_1.default.json());
-    // Static files for frontend dashboard
-    app.use('/dashboard', express_1.default.static(path_1.default.join(__dirname, '../../frontend/dashboard.html')));
     // Rate limiting
     const limiter = (0, express_rate_limit_1.default)({
         windowMs: finalConfig.rateLimitWindowMs,
@@ -292,7 +289,7 @@ function createApiServer(config = {}) {
             }
             else {
                 // Use getDb directly instead of accessing private property
-                transfers = await (0, database_config_1.getDb)()
+                transfers = await (0, database_config_2.getDb)()
                     .selectFrom('transfers')
                     .selectAll()
                     .orderBy('block_number', 'desc')
@@ -307,7 +304,7 @@ function createApiServer(config = {}) {
                 from_address: t.from_address,
                 to_address: t.to_address,
                 amount: t.amount,
-                token_address: t.token_address,
+                token_address: 'token_address' in t ? t.token_address : t.contract_address,
                 created_at: t.created_at,
             }));
             res.json({
@@ -425,6 +422,22 @@ function createApiServer(config = {}) {
         }
     });
     /**
+     * GET /dashboard
+     * Production Monitor Dashboard
+     */
+    app.get('/dashboard', (req, res) => {
+        try {
+            const dashboardPath = path_1.default.join(__dirname, '../../frontend/dashboard.html');
+            const html = (0, fs_1.readFileSync)(dashboardPath, 'utf-8');
+            res.setHeader('Content-Type', 'text/html');
+            res.send(html);
+        }
+        catch (error) {
+            logger_1.default.error({ error }, 'Failed to load dashboard');
+            res.status(500).json({ error: 'Failed to load dashboard' });
+        }
+    });
+    /**
      * Error handling middleware
      */
     app.use((err, req, res, _next) => {
@@ -441,7 +454,7 @@ function createApiServer(config = {}) {
  */
 async function checkDbHealth() {
     try {
-        const db = (0, database_config_1.getDb)();
+        const db = (0, database_config_2.getDb)();
         await db.selectFrom('blocks').select('number').limit(1).execute();
         return true;
     }
@@ -478,7 +491,12 @@ async function startApiServer(config = {}) {
 if (require.main === module) {
     const port = parseInt(process.env.API_PORT || '3001', 10);
     const rpcUrl = process.env.RPC_URL || 'http://localhost:58545';
-    startApiServer({ port, rpcUrl }).catch((err) => {
+    // Initialize database first
+    (0, database_config_1.createDbConnection)()
+        .then(() => {
+        return startApiServer({ port, rpcUrl });
+    })
+        .catch((err) => {
         console.error('Failed to start API:', err);
         process.exit(1);
     });

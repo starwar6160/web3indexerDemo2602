@@ -102,6 +102,19 @@ curl http://localhost:3000/metrics
 - 集成测试：使用本地 Anvil/EVM 节点或测试链，验证端到端同步行为。
 - 压力测试：长期负载测试与内存泄漏检测脚本（示例脚本位于 scripts/）。
 - 恢复测试：中断进程后，从检查点恢复的正确性验证。
+- 混沌工程（Chaos Engineering）：主动注入故障验证系统弹性
+  - 测试套件位置：scripts/chaos/
+  - 覆盖场景：
+    1. 网络分区（RPC 故障模拟）：验证重试逻辑与指数退避
+    2. 数值边界（BigInt 精度）：验证 10^20 wei (100 ETH) 的存储与显示
+    3. 数据库崩溃：验证 checkpoint 机制与自动恢复
+    4. 链重组（Reorg）：5-block 深度回滚测试（开发中）
+  - 当前通过率：75% (3/4)
+    - ✅ toxic-rpc: RPC 故障恢复
+    - ✅ bigint: 数值精度处理
+    - ✅ db-killer: 崩溃恢复
+    - ⚠️  reorg: 重组检测（优化中）
+  - 运行方式：`npm run chaos:automated`
 - 建议在 CI 中包含静态类型检查、lint、关键单元测试及集成测试的最小快照。
 
 性能（示例）

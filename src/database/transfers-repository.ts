@@ -73,6 +73,8 @@ export class TransfersRepository {
   /**
    * Save transfers within a transaction (atomic with block write)
    * CRITICAL: Must be called within same trx as blockRepository.saveWithTrx
+   *
+   * DEMO MODE: Simplified insert without onConflict to avoid Kysely bug
    */
   async saveWithTrx(
     trx: any,
@@ -80,6 +82,7 @@ export class TransfersRepository {
   ): Promise<number> {
     if (transfers.length === 0) return 0;
 
+    // DEMO MODE: Direct insert (no upsert)
     await trx
       .insertInto('transfers')
       .values(
@@ -92,15 +95,6 @@ export class TransfersRepository {
           amount: t.amount,
           token_address: t.token_address,
         }))
-      )
-      .onConflict((oc: any) =>
-        oc.columns(['block_number', 'log_index']).doUpdateSet({
-          transaction_hash: (trx: any) => trx.ref('excluded.transaction_hash'),
-          from_address: (trx: any) => trx.ref('excluded.from_address'),
-          to_address: (trx: any) => trx.ref('excluded.to_address'),
-          amount: (trx: any) => trx.ref('excluded.amount'),
-          token_address: (trx: any) => trx.ref('excluded.token_address'),
-        })
       )
       .execute();
 

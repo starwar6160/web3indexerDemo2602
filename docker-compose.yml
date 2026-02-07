@@ -1,72 +1,135 @@
+# =============================================================================
+# Production Docker Compose Configuration
+# Architecture: 3-tier decoupled system (Node → DB → API)
+# =============================================================================
+
 version: '3.8'
 
 services:
-  anvil:
+  # -------------------------------------------------------------------------
+  # Layer 1: Blockchain Node (Data Source)
+  # -------------------------------------------------------------------------
+  blockchain-node:
     container_name: web3-indexer-anvil
     image: ghcr.io/foundry-rs/foundry:stable
-    entrypoint: ["anvil", "--host", "0.0.0.0", "--port", "8545", "--block-time", "2"]
+    entrypoint:
+      - "anvil"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8545"
+      - "--block-time"
+      - "2"
+      - "--chain-id"
+      - "31337"
     ports:
-      - "58545:8545"  # 使用 58545 端口避免 Hyper-V 冲突
+      - "58545:8545"
     environment:
       - ANVIL_ACCOUNTS=10
       - ANVIL_BALANCE=1000000000000000000000
     restart: unless-stopped
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8545"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # -------------------------------------------------------------------------
+  # Layer 2: Persistence Layer (PostgreSQL)
+  # -------------------------------------------------------------------------
   postgres:
     container_name: web3-indexer-db
-    image: postgres:15
+    image: postgres:15-alpine
     ports:
-      - "15432:5432"  # 使用 15432 端口避免 Hyper-V 冲突
+      - "5432:5432"
     environment:
-      - POSTGRES_DB=web3_indexer
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-    restart: unless-stopped
+      - POSTGRES_DB=${POSTGRES_DB:-web3_indexer}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # DISABLED: indexer 现在在 WSL2 原生环境运行
-  # 原因: WSL2 运行的 index-production.js 是最新的"战舰"级代码
-  # 而 Docker 容器里的代码是旧版本,已不再使用
-  #
-  # indexer:
-  #   build: .
-  #   container_name: web3-indexer-app
-  #   depends_on:
-  #     - anvil
-  #     - postgres
-  #   ports:
-  #     - "3000:3000"  # 健康检查端口
-  #   environment:
-  #     - RPC_URL=http://anvil:8545
-  #     - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
-  #     - POLL_INTERVAL_MS=2000
-  #     - DB_SYNC_BATCH_SIZE=10
-  #     - MAX_RETRIES=3
-  #     - LOG_LEVEL=info
-  #     - NODE_ENV=production
-  #     - HEALTH_CHECK_PORT=3000
-  #   restart: unless-stopped
-
-  # 管理容器 - 用于执行脚本和管理任务
-  workspace:
+  # -------------------------------------------------------------------------
+  # Layer 3: Sync Engine (Event Indexer)
+  # -------------------------------------------------------------------------
+  indexer:
     build:
       context: .
-      dockerfile: Dockerfile.workspace
-    container_name: web3-indexer-workspace
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: web3-indexer-sync
     depends_on:
-      - postgres
-      - anvil
+      blockchain-node:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
-      - RPC_URL=http://anvil:8545
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/web3_indexer
-    volumes:
-      - .:/app
-      - /app/node_modules
-    working_dir: /app
-    stdin_open: true
-    tty: true
-    command: /bin/bash
+      - RPC_URL=http://blockchain-node:8545
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-web3_indexer}
+      - NODE_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    restart: unless-stopped
+    networks:
+      - indexer-network
+    command: ["node", "dist/sync-engine.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep 'node dist/sync-engine.js' | grep -v grep || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # -------------------------------------------------------------------------
+  # Layer 4: Access Layer (REST API)
+  # -------------------------------------------------------------------------
+  api-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: web3-indexer-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      indexer:
+        condition: service_started
+    ports:
+      - "3001:3001"
+    environment:
+      - RPC_URL=http://blockchain-node:8545
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-web3_indexer}
+      - API_PORT=${API_PORT:-3001}
+      - NODE_ENV=production
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    restart: unless-stopped
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# -------------------------------------------------------------------------
+# Network Isolation
+# -------------------------------------------------------------------------
+networks:
+  indexer-network:
+    driver: bridge
+
+# -------------------------------------------------------------------------
+# Persistent Volumes
+# -------------------------------------------------------------------------
 volumes:
   postgres_data:
+    driver: local

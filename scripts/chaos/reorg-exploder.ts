@@ -75,24 +75,42 @@ async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Validate contract exists
-async function getValidContract(
+// Ensure contract exists - auto-deploy if missing
+async function ensureContract(
+  walletClient: any,
   publicClient: any
 ): Promise<`0x${string}`> {
   const envAddress = process.env.TOKEN_CONTRACT_ADDRESS as `0x${string}`;
 
-  if (!envAddress) {
-    throw new Error('TOKEN_CONTRACT_ADDRESS must be set in environment');
+  // Try to use existing contract from environment
+  if (envAddress) {
+    try {
+      const code = await publicClient.getBytecode({ address: envAddress });
+      if (code && code !== '0x') {
+        console.log(`✅ Contract found at ${envAddress}\n`);
+        return envAddress;
+      }
+      console.log(`⚠️  Contract address from env has no bytecode`);
+    } catch (error) {
+      console.log(`⚠️  Failed to check contract address: ${error}`);
+    }
   }
 
-  // Verify contract exists on chain
-  const code = await publicClient.getBytecode({ address: envAddress });
-  if (!code || code === '0x') {
-    throw new Error(`No contract at ${envAddress}. Run 'make dev-with-demo' first.`);
+  // Auto-deploy fresh contract
+  console.log('\n🏗️  No valid contract found. Deploying fresh SimpleBank...\n');
+  const deployHash = await walletClient.deployContract({
+    abi: SIMPLE_BANK_ABI,
+    bytecode: SIMPLE_BANK_BYTECODE,
+  });
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+
+  if (!receipt.contractAddress) {
+    throw new Error('Contract deployment failed');
   }
 
-  console.log(`✅ Using existing contract: ${envAddress}\n`);
-  return envAddress;
+  console.log(`✅ Fresh contract deployed: ${receipt.contractAddress}\n`);
+  return receipt.contractAddress;
 }
 
 async function main() {
@@ -128,20 +146,20 @@ async function main() {
     });
     console.log(`✅ Funded ${account.address} with 10000 ETH`);
 
-    // 🏗️ Validate existing contract from demo
-    const tokenAddress = await getValidContract(publicClient);
+    // 🏗️ Ensure contract exists (use existing or auto-deploy)
+    const tokenAddress = await ensureContract(walletClient, publicClient);
 
-    // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
-    console.log('\n💰 Depositing to get SimpleBank tokens...');
+    // 💰 DEPOSIT: Get SimpleBank internal balance by depositing ETH
+    console.log('\n💰 Depositing 10 ETH to get SimpleBank internal balance...');
     const depositHash = await walletClient.writeContract({
       address: tokenAddress as `0x${string}`,
       abi: SIMPLE_BANK_ABI,
       functionName: 'deposit',
-      value: parseEther('1000'), // Deposit 1000 ETH
+      value: parseEther('10'), // Deposit 10 ETH
     });
 
     await publicClient.waitForTransactionReceipt({ hash: depositHash });
-    console.log(`✅ Deposited 1000 ETH, received tokens\n`);
+    console.log(`✅ Deposited 10 ETH, received internal balance\n`);
 
     // Get current block number
     const currentBlock = await publicClient.getBlockNumber();

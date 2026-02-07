@@ -292,6 +292,10 @@ async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string
   console.log(`   TOKEN_CONTRACT_ADDRESS: ${testEnv.TOKEN_CONTRACT_ADDRESS || 'NOT SET'}`);
   console.log(`   RPC_URL: ${testEnv.RPC_URL}\n`);
 
+  // ⏸️ CRITICAL: Force 2-second cooldown to prevent EADDRINUSE
+  console.log('⏸️  Cooling down 2 seconds to prevent port conflicts...\n');
+  await sleep(2000);
+
   // Automated setup
   if (test.automatedSetup) {
     console.log('⚙️  Running automated setup...');
@@ -307,9 +311,12 @@ async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string
   console.log('💣 Executing chaos test...\n');
 
   try {
+    // CRITICAL: Merge testEnv with process.env to preserve all environment variables
+    const execEnv = { ...process.env, ...testEnv };
+
     execSync(`npx ts-node --transpile-only ${test.file}`, {
       stdio: 'inherit',
-      env: testEnv,  // Use injected environment instead of process.env
+      env: execEnv,  // Use merged environment
     });
 
     console.log('\n✅ Chaos test execution completed\n');

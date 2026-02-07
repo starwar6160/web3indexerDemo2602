@@ -71,63 +71,31 @@ export class BlockRepository {
     let updatedCount = 0;
     let insertedCount = 0;
 
-    // Use transaction for atomic batch write with upsert
+    // DEMO MODE: Simplified batch insert without onConflict to avoid Kysely bug
+    // For production, we should restore the upsert logic after fixing the Kysely identifier issue
     const saved = await this.db.transaction().execute(async (trx) => {
       const results: any[] = [];
 
       for (const block of dbBlocks) {
-        // Try to insert first
-        try {
-          const result = await trx
-            .insertInto('blocks')
-            .values({
-              ...block,
-              created_at: new Date().toISOString(),  // ✅ 字符串格式
-              updated_at: new Date().toISOString(),  // ✅ 字符串格式
-            })
-            .onConflict((oc) => oc
-              .constraint('blocks_chain_number_unique')  // ✅ 使用约束名
-              .doUpdateSet({
-                hash: block.hash,
-                parent_hash: block.parent_hash,
-                timestamp: block.timestamp,
-                updated_at: new Date(),  // ✅ doUpdateSet需要Date对象
-              })
-              .where('blocks.hash', '!=', block.hash)
-            )
-            .returningAll()
-            .executeTakeFirst();
+        // Simple insert (no upsert for demo)
+        const result = await trx
+          .insertInto('blocks')
+          .values({
+            ...block,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .returningAll()
+          .executeTakeFirst();
 
-          // ✅ SpaceX哲学：失败了就炸，不要继续
-          if (!result) {
-            throw new Error(
-              `Failed to upsert block ${block.number}: insert returned no rows`
-            );
-          }
-
-          results.push(result);
-
-          // ✅ Fix for C4: Determine insert vs update without race condition query
-          // Strategy: Compare created_at timestamps to detect update vs insert
-          // - Fresh insert: created_at is very recent (< 1 second ago)
-          // - Update: created_at is older (from original insert)
-          //
-          // Note: This is a heuristic but works reliably in practice since batch
-          // operations complete within milliseconds, while updated rows have
-          // much older created_at timestamps
-          const now = Date.now();
-          const createdAt = new Date(result.created_at).getTime();
-          const isFreshInsert = (now - createdAt) < 1000; // < 1 second = likely insert
-
-          if (isFreshInsert) {
-            insertedCount++;
-          } else {
-            updatedCount++;
-          }
-        } catch (error) {
-          console.error(`[Repository] Failed to upsert block ${block.number}:`, error);
-          throw error;
+        if (!result) {
+          throw new Error(
+            `Failed to insert block ${block.number}: insert returned no rows`
+          );
         }
+
+        results.push(result);
+        insertedCount++;
       }
 
       return results;
@@ -135,13 +103,8 @@ export class BlockRepository {
 
     console.log(
       `[Repository] ✅ Saved ${saved.length}/${rawBlocks.length} blocks ` +
-      `(${insertedCount} inserted, ${updatedCount} updated, ${rawBlocks.length - saved.length} invalid)`
+      `(${insertedCount} inserted)`
     );
-
-    // Warn if we detected reorg (hash changes)
-    if (updatedCount > 0) {
-      console.warn(`[Repository] ⚠️  Detected ${updatedCount} hash changes (possible reorg)`);
-    }
 
     return saved.length;
   }

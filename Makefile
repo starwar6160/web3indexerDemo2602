@@ -250,6 +250,18 @@ reset-data:
 	@echo '$(GREEN)✅ Data reset complete!$(NC)'
 	@echo '$(YELLOW)💡 Now run: make dev-with-demo$(NC)'
 
+## reset-all: HARD RESET - Kill processes + truncate all tables + restart (breaks "logic deadlock")
+reset-all:
+	@echo '$(RED)🛑 HARD RESET: Breaking logic deadlock...$(NC)'
+	@echo '$(BLUE)Step 1: Killing all node processes...$(NC)'
+	-pkill -f "ts-node" || true
+	-pkill -f "node.*index" || true
+	@echo '$(BLUE)Step 2: Hard resetting database (truncate all tables)...$(NC)'
+	docker exec web3-indexer-db psql -U postgres -d web3_indexer -c "TRUNCATE blocks, transfers, sync_checkpoints RESTART IDENTITY CASCADE;" || echo "Database not ready, will initialize..."
+	@echo '$(BLUE)Step 3: Starting fresh sync with demo data...$(NC)'
+	@$(MAKE) dev-with-demo
+	@echo '$(GREEN)✅ HARD RESET COMPLETE! Indexed Height should now sync from 0$(NC)'
+
 ## demo-reset: Complete demo reset (kill processes + clean DB + restart with demo)
 demo-reset:
 	@echo '$(BLUE)🎬 Complete Demo Reset$(NC)'

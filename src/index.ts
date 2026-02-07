@@ -9,7 +9,10 @@ const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '2000'); // 2 second
 const DB_SYNC_BATCH_SIZE = BigInt(parseInt(process.env.DB_SYNC_BATCH_SIZE || '10')); // 同步批次大小 - 使用 BigInt
 
 const client = createPublicClient({
-  transport: http(ANVIL_RPC_URL),
+  transport: http(ANVIL_RPC_URL, {
+    timeout: 30_000,
+    retryCount: 0,
+  }),
 });
 
 let blockRepository: BlockRepository;

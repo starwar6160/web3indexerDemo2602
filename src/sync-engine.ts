@@ -291,7 +291,7 @@ export class SyncEngine {
       if (result.success && 'block' in result) {
         blocksToSave.push(result.block as any);
       } else {
-        failedBlocks.push({ number: result.blockNumber, error: result.error });
+        failedBlocks.push({ number: result.blockNumber, error: result.error || 'Unknown error' });
       }
     }
 
@@ -304,19 +304,23 @@ export class SyncEngine {
     }
 
     // Sort blocks by number to ensure correct order
-    blocksToSave.sort((a, b) => (a.number > b.number ? 1 : -1));
+    blocksToSave.sort((a, b) => {
+      const aNum = a.number ?? 0n;
+      const bNum = b.number ?? 0n;
+      return aNum > bNum ? 1 : -1;
+    });
 
     if (blocksToSave.length === 0) {
       throw new Error('No blocks fetched in batch');
     }
 
     // Phase 2: Validate chain continuity (C2 fix)
-    let previousHash = currentParentHash;
+    let previousHash: string | null = currentParentHash ?? null;
     let firstBlock = true;
 
     for (const block of blocksToSave) {
       // Skip parentHash validation for genesis block or first block in batch if no expectedParentHash
-      if (firstBlock && previousHash === undefined) {
+      if (firstBlock && previousHash === null) {
         firstBlock = false;
         previousHash = block.hash;
         continue;
@@ -335,7 +339,9 @@ export class SyncEngine {
         // Check if this is a reorg by looking up the block in database
         // NOTE: No FOR UPDATE lock needed here - we only read to detect reorg
         // The actual reorg handling with proper locking is done inside the transaction below
-        const existingBlock = await this.blockRepository.findById(block.number);
+        const existingBlock = block.number !== null 
+          ? await this.blockRepository.findById(block.number)
+          : null;
 
         if (existingBlock && existingBlock.hash !== block.hash) {
           console.warn(
@@ -417,6 +423,7 @@ export class SyncEngine {
       }
 
       // 4a. Save blocks
+      const chainId = 31337n; // Default chain ID for local anvil
       for (const block of dbBlocks) {
         const now = new Date().toISOString();
 
@@ -424,6 +431,7 @@ export class SyncEngine {
           .insertInto('blocks')
           .values({
             ...block,
+            chain_id: chainId,
             created_at: now,
             updated_at: now,
           })
@@ -433,7 +441,7 @@ export class SyncEngine {
               hash: (eb) => eb.ref('excluded.hash'), // Use excluded pseudo-table
               parent_hash: (eb) => eb.ref('excluded.parent_hash'),
               timestamp: (eb) => eb.ref('excluded.timestamp'),
-              updated_at: now as any,
+              updated_at: (eb) => eb.ref('excluded.updated_at'),
             })
           )
           .returningAll()
@@ -460,6 +468,9 @@ export class SyncEngine {
     });
 
     const lastBlock = blocksToSave[blocksToSave.length - 1];
+    if (!lastBlock || lastBlock.number === null || lastBlock.hash === null) {
+      throw new Error('Last block is null or incomplete');
+    }
 
     console.log(
       `[SyncEngine] ✅ Batch sync complete: ${insertedCount} inserted, ` +

@@ -11,7 +11,10 @@ import { startHealthServer } from './utils/health-server';
 import { ErrorHandler } from './utils/error-classifier';
 
 const client = createPublicClient({
-  transport: http(config.RPC_URL),
+  transport: http(config.RPC_URL, {
+    timeout: 30_000,
+    retryCount: 0,
+  }),
 });
 
 let blockRepository: BlockRepository;

@@ -19,9 +19,13 @@ import {
   handleReorg,
 } from './utils/reorg-handler';
 import { metrics } from './utils/metrics-collector';
+import { CircuitBreaker } from './utils/circuit-breaker';
 
 const client = createPublicClient({
-  transport: http(config.RPC_URL),
+  transport: http(config.RPC_URL, {
+    timeout: 30_000, // 30秒超时
+    retryCount: 0,   // 禁用内置重试，由 retryWithBackoffSelective 控制
+  }),
 });
 
 let blockRepository: BlockRepository;
@@ -36,6 +40,13 @@ const rateLimiter = new TokenBucketRateLimiter({
   maxBurstTokens: 20,
 });
 
+// Circuit breaker: 5 failures trigger 60s cooldown
+const circuitBreaker = new CircuitBreaker({
+  failureThreshold: 5,
+  resetTimeoutMs: 60000,
+  halfOpenMaxCalls: 3,
+});
+
 /**
  * Wrapper for RPC calls with rate limiting, metrics, and retries
  */
@@ -45,47 +56,51 @@ async function rpcCallWithMetrics<T>(
 ): Promise<T> {
   const startTime = Date.now();
 
-  // Apply rate limiting
+  // Apply rate limiting and circuit breaker
   await rateLimiter.consume(1);
 
-  try {
-    const result = await retryWithBackoffSelective(
-      fn,
-      (error) => {
-        // Retry on network errors and rate limits
-        const errorMessage = error.message.toLowerCase();
-        return (
-          errorMessage.includes('network') ||
-          errorMessage.includes('timeout') ||
-          errorMessage.includes('rate limit') ||
-          errorMessage.includes('429')
-        );
-      },
-      {
-        maxRetries: 3,
-        baseDelayMs: 100,
-        maxDelayMs: 5000,
+  return circuitBreaker.execute(async () => {
+    const innerStartTime = Date.now();
+
+    try {
+      const result = await retryWithBackoffSelective(
+        fn,
+        (error) => {
+          // Retry on network errors and rate limits
+          const errorMessage = error.message.toLowerCase();
+          return (
+            errorMessage.includes('network') ||
+            errorMessage.includes('timeout') ||
+            errorMessage.includes('rate limit') ||
+            errorMessage.includes('429')
+          );
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 100,
+          maxDelayMs: 5000,
+        }
+      );
+
+      if (!result.success) {
+        throw result.error || new Error('RPC call failed');
       }
-    );
 
-    if (!result.success) {
-      throw result.error || new Error('RPC call failed');
+      const latency = Date.now() - innerStartTime;
+      recordRpcCall(true, latency);
+
+      // 🎯 Metrics: Record RPC call latency
+      metrics.recordRpcLatency(operation, latency);
+
+      return result.data as T;
+    } catch (error) {
+      const latency = Date.now() - innerStartTime;
+      recordRpcCall(false, latency);
+
+      logger.error({ error, operation }, 'RPC call failed');
+      throw error;
     }
-
-    const latency = Date.now() - startTime;
-    recordRpcCall(true, latency);
-
-    // 🎯 Metrics: Record RPC call latency
-    metrics.recordRpcLatency(operation, latency);
-
-    return result.data as T;
-  } catch (error) {
-    const latency = Date.now() - startTime;
-    recordRpcCall(false, latency);
-
-    logger.error({ error, operation }, 'RPC call failed');
-    throw error;
-  }
+  });
 }
 
 /**
@@ -543,13 +558,13 @@ async function main(): Promise<void> {
     setupGlobalErrorHandlers();
     logger.info('✅ Step 1: Global error handlers configured');
 
-    // 启动健康检查服务器
-    healthServerInstance = await startHealthServer();
-    logger.info('✅ Step 2: Health server started');
-
-    // 初始化数据库
+    // 初始化数据库（必须先完成）
     await initializeDatabase();
-    logger.info('✅ Step 3: Database initialized');
+    logger.info('✅ Step 2: Database initialized');
+
+    // 数据库就绪后才启动健康服务器
+    healthServerInstance = await startHealthServer();
+    logger.info('✅ Step 3: Health server started');
 
     // 测试初始连接
     logger.info('Testing initial RPC connection...');

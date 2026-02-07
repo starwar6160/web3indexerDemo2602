@@ -30,7 +30,10 @@ export class EventIndexer {
     contractAddress: Address
   ) {
     this.client = createPublicClient({
-      transport: http(rpcUrl),
+      transport: http(rpcUrl, {
+        timeout: 30_000, // 30秒超时
+        retryCount: 0,
+      }),
     });
     this.txRepo = new TransactionRepository();
     this.syncRepo = new SyncStatusRepository();

@@ -117,40 +117,71 @@ export class SyncEngine {
    * @param expectedParentHash Expected parent hash for startBlock (for validation)
    * @returns Last block hash for next batch validation
    */
+  /**
+   * SyncEngineConfig with pagination for getLogs
+   */
   private async getTransferEvents(fromBlock: bigint, toBlock: bigint): Promise<Omit<Transfer, 'id' | 'created_at'>[]> {
     if (!this.config.tokenContract) {
       return [];
     }
 
-    try {
-      const logs = await this.client.getLogs({
-        address: this.config.tokenContract,
-        event: simpleBankTransferAbi[0],
-        fromBlock,
-        toBlock,
-      });
+    // M4 Fix: Paginate getLogs to avoid RPC limits (typically 10k events per request)
+    const LOGS_PAGE_SIZE = 100n; // Fetch logs in chunks of 100 blocks
+    const allTransfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
 
-      const transfers = logs.map((log) => {
-        const decoded = decodeEventLog({
-          abi: simpleBankTransferAbi,
-          data: log.data,
-          topics: log.topics,
+    try {
+      let currentFrom = fromBlock;
+
+      while (currentFrom <= toBlock) {
+        // Calculate the end block for this page
+        const currentTo = currentFrom + LOGS_PAGE_SIZE - 1n < toBlock
+          ? currentFrom + LOGS_PAGE_SIZE - 1n
+          : toBlock;
+
+        console.log(`[SyncEngine] Fetching logs from ${currentFrom} to ${currentTo}...`);
+
+        const logs = await this.client.getLogs({
+          address: this.config.tokenContract,
+          event: simpleBankTransferAbi[0],
+          fromBlock: currentFrom,
+          toBlock: currentTo,
         });
 
-        return {
-          block_number: log.blockNumber,
-          transaction_hash: log.transactionHash,
-          log_index: log.logIndex,
-          from_address: String(decoded.args?.from || '0x0'),
-          to_address: String(decoded.args?.to || '0x0'),
-          amount: String(decoded.args?.amount || '0'),
-          token_address: this.config.tokenContract!,
-        };
-      });
+        console.log(`[SyncEngine] Fetched ${logs.length} logs in range ${currentFrom}-${currentTo}`);
 
-      // Validate with Zod - fail fast on field mismatch or invalid data
+        // Process logs for this page
+        const pageTransfers = logs.map((log) => {
+          const decoded = decodeEventLog({
+            abi: simpleBankTransferAbi,
+            data: log.data,
+            topics: log.topics,
+          });
+
+          return {
+            block_number: log.blockNumber,
+            transaction_hash: log.transactionHash,
+            log_index: log.logIndex,
+            from_address: String(decoded.args?.from || '0x0'),
+            to_address: String(decoded.args?.to || '0x0'),
+            amount: String(decoded.args?.amount || '0'),
+            token_address: this.config.tokenContract!,
+          };
+        });
+
+        allTransfers.push(...pageTransfers);
+
+        // Move to next page
+        currentFrom = currentTo + 1n;
+
+        // Small delay to avoid rate limiting
+        if (currentFrom <= toBlock) {
+          await this.sleep(50);
+        }
+      }
+
+      // Validate all transfers with Zod - fail fast on field mismatch or invalid data
       const validatedTransfers: TransferDTO[] = [];
-      for (const [index, rawTransfer] of transfers.entries()) {
+      for (const [index, rawTransfer] of allTransfers.entries()) {
         try {
           const validated = TransferSchema.parse(rawTransfer);
           validatedTransfers.push(validated);
@@ -163,6 +194,7 @@ export class SyncEngine {
         }
       }
 
+      console.log(`[SyncEngine] Total transfers fetched: ${validatedTransfers.length}`);
       return validatedTransfers;
     } catch (error) {
       console.error('[SyncEngine] Failed to fetch Transfer events:', error);
@@ -300,10 +332,9 @@ export class SyncEngine {
         );
 
         // Check if this is a reorg by looking up the block in database
-        // 🔵 Fix D5: Use SELECT FOR UPDATE to lock the row during transaction
-        // Problem: Reading (findById) and writing (insert) in same transaction without lock
-        // Solution: Lock the row to prevent concurrent modifications
-        const existingBlock = await this.blockRepository.findByIdForUpdate(block.number);
+        // NOTE: No FOR UPDATE lock needed here - we only read to detect reorg
+        // The actual reorg handling with proper locking is done inside the transaction below
+        const existingBlock = await this.blockRepository.findById(block.number);
 
         if (existingBlock && existingBlock.hash !== block.hash) {
           console.warn(

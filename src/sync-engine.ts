@@ -7,6 +7,7 @@ import { validateBlocks, toDbBlock, ValidatedBlock } from './database/schemas';
 import { TransferSchema, TransferDTO } from './schemas/transfer.schema';
 import { sql } from 'kysely';
 import pLimit from 'p-limit';
+import { getObservability, Observability } from './utils/observability';
 
 /**
  * SimpleBank Transfer Event ABI

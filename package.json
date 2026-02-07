@@ -43,6 +43,7 @@
     "test:watch": "vitest",
     "chaos": "npx ts-node scripts/chaos/run-chaos-tests.ts",
     "chaos:all": "npx ts-node scripts/chaos/run-chaos-tests.ts",
+    "chaos:automated": "npx ts-node --transpile-only scripts/chaos/automated-runner.ts",
     "chaos:reorg": "npx ts-node scripts/chaos/reorg-exploder.ts",
     "chaos:toxic": "npx ts-node scripts/chaos/toxic-rpc-proxy.ts",
     "chaos:bigint": "npx ts-node scripts/chaos/bigint-nuke.ts",

@@ -210,6 +210,10 @@ async function main() {
   console.log('\n☠️  CHAOS MONKEY: Toxic RPC Proxy Test\n');
   console.log('======================================\n');
 
+  // Check for automated mode
+  const isAutomated = process.argv.includes('--automated');
+  const automatedDuration = parseInt(process.argv.find(arg => arg.startsWith('--duration='))?.split('=')[1] || '60000');
+
   proxyServer.listen(PROXY_PORT, () => {
     console.log(`🚀 Toxic RPC Proxy started on port ${PROXY_PORT}`);
     console.log(`   Forwarding to: ${TARGET_RPC}`);
@@ -219,17 +223,29 @@ async function main() {
     console.log(`   • Drop probability: ${CHAOS_CONFIG.dropProbability * 100}%`);
     console.log(`   • Corrupt probability: ${CHAOS_CONFIG.corruptProbability * 100}%`);
 
-    console.log(`\n📝 Test Instructions:`);
-    console.log(`   1. Update your indexer's RPC_URL to use http://localhost:${PROXY_PORT}`);
-    console.log(`   2. Start your indexer`);
-    console.log(`   3. Watch the chaos unfold!`);
-    console.log(`   4. Press 's' to stop chaos, 'q' to quit, 'i' for stats\n`);
+    if (isAutomated) {
+      console.log(`\n🤖 AUTOMATED MODE`);
+      console.log(`   Running for ${automatedDuration}ms then auto-exit`);
+      console.log(`   RPC_URL = http://localhost:${PROXY_PORT}\n`);
 
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.setEncoding('utf8');
+      setTimeout(() => {
+        console.log('\n✅ Automated test duration completed, shutting down...\n');
+        proxyServer.close();
+        process.exit(0);
+      }, automatedDuration);
 
-    process.stdin.on('data', (key) => {
+    } else {
+      console.log(`\n📝 Test Instructions:`);
+      console.log(`   1. Update your indexer's RPC_URL to use http://localhost:${PROXY_PORT}`);
+      console.log(`   2. Start your indexer`);
+      console.log(`   3. Watch the chaos unfold!`);
+      console.log(`   4. Press 's' to stop chaos, 'q' to quit, 'i' for stats\n`);
+
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
+
+      process.stdin.on('data', (key) => {
       const input = key.toString().trim().toLowerCase();
       if (input === 'q') {
         console.log('\n🛑 Shutting down proxy...');
@@ -249,6 +265,7 @@ async function main() {
         console.log('');
       }
     });
+    }
 
     // Print stats every 10 seconds
     setInterval(() => {

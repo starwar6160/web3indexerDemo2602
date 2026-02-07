@@ -22,7 +22,7 @@
  */
 
 import { execSync } from 'child_process';
-import { createWalletClient, createPublicClient, http } from 'viem';
+import { createWalletClient, createPublicClient, http, createTestClient, parseEther } from 'viem';
 import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -117,6 +117,14 @@ async function main() {
   console.log('=====================================\n');
 
   const account = privateKeyToAccount(PRIVATE_KEY);
+
+  // Create test client for Anvil cheatcodes
+  const testClient = createTestClient({
+    chain: anvil,
+    mode: 'anvil',
+    transport: http(RPC_URL),
+  });
+
   const walletClient = createWalletClient({
     account,
     chain: anvil,
@@ -134,6 +142,14 @@ async function main() {
     process.exit(1);
   }
 
+  // 💰 CHEATCODE: Fund account
+  console.log('💰 Funding test account with Anvil cheatcode...');
+  await testClient.setBalance({
+    address: account.address,
+    value: parseEther('10000'),
+  });
+  console.log(`✅ Funded ${account.address} with 10000 ETH\n`);
+
   try {
     console.log('📝 PREPARATION: Creating 20 blocks with transfers...\n');
 
@@ -149,15 +165,14 @@ async function main() {
         data: '0xa9059cbb' +
               '0'.repeat(24) +
               recipient.slice(2).toLowerCase() +
-              '0'.repeat(64 - (1000n + BigInt(i)).toString(16).length) +
-              (1000n + BigInt(i)).toString(16),
+              '0'.repeat(63) + '1', // 1 wei
       });
 
       txHashes.push(hash);
 
-      // Mine a block
+      // Mine a block using testClient (no extend needed)
       // @ts-ignore
-      await publicClient.extend({ mine: 1 });
+      await testClient.mine({ blocks: 1 });
 
       await sleep(300);
     }

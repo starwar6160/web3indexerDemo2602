@@ -33,28 +33,18 @@ interface ChaosTest {
 // ============================================================
 
 function cleanupPorts() {
-  console.log('\n🧹 Cleaning up ghost processes...\n');
+  console.log('\n🧹 Aggressively cleaning up ghost processes...\n');
 
-  try {
-    // Kill processes on port 8546 (toxic proxy)
+  const ports = [8546, 3001, 3000];
+  ports.forEach(port => {
     try {
-      execSync('lsof -ti:8546 | xargs kill -9 2>/dev/null || true', { stdio: 'pipe' });
-      console.log('✅ Port 8546 cleaned');
+      // More aggressive port killing that works on Linux/WSL
+      execSync(`lsof -t -i:${port} | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore' });
+      console.log(`✅ Port ${port} cleaned`);
     } catch (error) {
-      // Port already clear
+      // Port already clear or doesn't exist
     }
-
-    // Kill processes on port 3001 (API server)
-    try {
-      execSync('lsof -ti:3001 | xargs kill -9 2>/dev/null || true', { stdio: 'pipe' });
-      console.log('✅ Port 3001 cleaned');
-    } catch (error) {
-      // Port already clear
-    }
-
-  } catch (error) {
-    // Ignore cleanup errors
-  }
+  });
 }
 
 // ============================================================

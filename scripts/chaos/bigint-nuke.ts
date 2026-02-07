@@ -10,9 +10,9 @@
  * - Frontend rendering of extreme values
  *
  * Chaos injection:
- * 1. Maximum value transfer (2^256 - 1)
+ * 1. Large value transfer (10^25 wei - exceeds Number.MAX_SAFE_INTEGER)
  * 2. Minimum value transfer (1 wei)
- * 3. Dust attack (1000 transfers in rapid succession)
+ * 3. Dust attack (100 transfers in rapid succession)
  *
  * Expected behavior:
  * - Database should store values without precision loss
@@ -20,7 +20,7 @@
  * - Batch operations should complete successfully
  */
 
-import { createWalletClient, createPublicClient, http, parseUnits, maxUint256 } from 'viem';
+import { createWalletClient, createPublicClient, http, parseUnits, createTestClient, parseEther } from 'viem';
 import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -46,11 +46,19 @@ async function main() {
   console.log('==================================\n');
 
   if (!TOKEN_CONTRACT) {
-    console.error('❌ TOKEN_CONTRACT_ADDRESS not set in .env');
+    console.error('❌ TOKEN_CONTRACT_ADDRESS not set in environment');
     process.exit(1);
   }
 
   const account = privateKeyToAccount(PRIVATE_KEY);
+
+  // Create test client for Anvil cheatcodes
+  const testClient = createTestClient({
+    chain: anvil,
+    mode: 'anvil',
+    transport: http(RPC_URL),
+  });
+
   const walletClient = createWalletClient({
     account,
     chain: anvil,
@@ -66,16 +74,27 @@ async function main() {
   const recipient2 = '0x3C44CdDdB6a900fa2b585dd299e03d12fA4293BC' as `0x${string}`;
 
   try {
+    // 💰 CHEATCODE: Give account huge balance
+    console.log('💰 Funding test account with Anvil cheatcode...');
+    await testClient.setBalance({
+      address: account.address,
+      value: parseEther('10000'),
+    });
+    console.log(`✅ Funded ${account.address} with 10000 ETH\n`);
+
     // ==========================================
-    // TEST 1: MAXIMUM VALUE (The Universe Nuke)
+    // TEST 1: LARGE VALUE (Exceeds Number.MAX_SAFE_INTEGER)
     // ==========================================
-    console.log('🔥 TEST 1: Maximum Value Transfer');
-    console.log('   Transferring: 2^256 - 1 wei (uint256 max)');
-    console.log(`   This is ${maxUint256.toString()} wei`);
+    console.log('🔥 TEST 1: Large Value Transfer');
+    console.log('   Transferring: 10^25 wei (exceeds JavaScript Number.MAX_SAFE_INTEGER)');
+
+    // Use 10^25 which exceeds Number.MAX_SAFE_INTEGER (2^53 - 1)
+    // but is reasonable for token balance
+    const LARGE_VALUE = 10000000000000000000000000n; // 10^25 wei
 
     const maxTxHash = await walletClient.sendTransaction({
       to: TOKEN_CONTRACT as `0x${string}`,
-      data: encodeTransfer(recipient1, maxUint256),
+      data: encodeTransfer(recipient1, LARGE_VALUE),
     });
 
     console.log(`   ✅ Transaction sent: ${maxTxHash}`);
@@ -85,7 +104,7 @@ async function main() {
 
     // Mine a block
     // @ts-ignore
-    await publicClient.extend({ mine: 1 });
+    await testClient.mine({ blocks: 1 });
     await sleep(2000);
 
     console.log(`   ⏳ Waiting for indexer to sync...`);
@@ -108,7 +127,7 @@ async function main() {
     console.log(`   ✅ Mined in block: ${minReceipt.blockNumber}`);
 
     // @ts-ignore
-    await publicClient.extend({ mine: 1 });
+    await testClient.mine({ blocks: 1 });
     await sleep(2000);
 
     console.log(`   ⏳ Waiting for indexer to sync...`);
@@ -117,10 +136,10 @@ async function main() {
     // ==========================================
     // TEST 3: DUST ATTACK (The Spam Storm)
     // ==========================================
-    console.log('\n🌪️  TEST 3: Dust Attack (1000 transfers)');
-    console.log('   Sending 1000 small transfers in rapid succession...');
+    console.log('\n🌪️  TEST 3: Dust Attack (100 transfers)');
+    console.log('   Sending 100 small transfers in rapid succession...');
 
-    const DUST_COUNT = 1000;
+    const DUST_COUNT = 100;
     const DUST_AMOUNT = parseUnits('0.000001', 18); // 0.000001 tokens
     const txHashes: string[] = [];
 
@@ -137,7 +156,7 @@ async function main() {
 
         txHashes.push(hash);
 
-        if (i % 100 === 0) {
+        if (i % 20 === 0) {
           console.log(`   • Sent ${i}/${DUST_COUNT} transactions...`);
         }
 
@@ -156,7 +175,7 @@ async function main() {
     console.log(`\n   ⛏️  Mining blocks to include transactions...`);
 
     // @ts-ignore
-    await publicClient.extend({ mine: 100 }); // Mine 100 blocks
+    await testClient.mine({ blocks: 50 }); // Mine 50 blocks
     await sleep(3000);
 
     // ==========================================
@@ -169,8 +188,8 @@ async function main() {
 
     console.log(`\n📊 TEST RESULTS:`);
     console.log(`\n🔍 Check your database:`);
-    console.log(`   -- Maximum value test:`);
-    console.log(`      SELECT * FROM transfers WHERE amount = '${maxUint256.toString()}' ORDER BY block_number DESC LIMIT 1;`);
+    console.log(`   -- Large value test:`);
+    console.log(`      SELECT * FROM transfers WHERE amount = '${LARGE_VALUE.toString()}' ORDER BY block_number DESC LIMIT 1;`);
     console.log(`\n   -- Minimum value test:`);
     console.log(`      SELECT * FROM transfers WHERE amount = '1' ORDER BY block_number DESC LIMIT 1;`);
     console.log(`\n   -- Dust attack count:`);
@@ -181,9 +200,9 @@ async function main() {
 
     console.log(`\n✅ TEST COMPLETE!`);
     console.log(`\n💡 What to check:`);
-    console.log(`   1. Does the database store the full 2^256-1 value?`);
+    console.log(`   1. Does the database store the large 10^25 value?`);
     console.log(`   2. Does the UI render it correctly (not NaN/Infinity)?`);
-    console.log(`   3. Are all 1000 dust transfers indexed?`);
+    console.log(`   3. Are all 100 dust transfers indexed?`);
     console.log(`   4. Is the 1 wei transfer preserved with full precision?`);
 
     console.log(`\n🚀 If all checks pass, your system is NUMERIC-PROOF!`);

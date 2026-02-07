@@ -17,7 +17,7 @@
  * 5. Indexer re-syncs with new canonical chain
  */
 
-import { createWalletClient, createPublicClient, http } from 'viem';
+import { createWalletClient, createPublicClient, http, createTestClient, parseEther } from 'viem';
 import { foundry as anvil } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -33,6 +33,14 @@ async function main() {
   console.log('=====================================\n');
 
   const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`);
+
+  // Create test client for Anvil cheatcodes
+  const testClient = createTestClient({
+    chain: anvil,
+    mode: 'anvil',
+    transport: http(RPC_URL),
+  });
+
   const walletClient = createWalletClient({
     account,
     chain: anvil,
@@ -45,14 +53,22 @@ async function main() {
   });
 
   try {
+    // 💰 CHEATCODE: Give account huge balance
+    console.log('💰 Funding test account with Anvil cheatcode...');
+    await testClient.setBalance({
+      address: account.address,
+      value: parseEther('10000'),
+    });
+    console.log(`✅ Funded ${account.address} with 10000 ETH\n`);
+
     // Get current block number
     const currentBlock = await publicClient.getBlockNumber();
     console.log(`📍 Current block: ${currentBlock}`);
 
-    // Get token contract address from .env or use a default
+    // Get token contract address
     const tokenAddress = process.env.TOKEN_CONTRACT_ADDRESS;
     if (!tokenAddress) {
-      throw new Error('TOKEN_CONTRACT_ADDRESS not set in .env');
+      throw new Error('TOKEN_CONTRACT_ADDRESS not set in environment');
     }
 
     console.log(`\n📝 Phase 1: Creating canonical chain (5 blocks with transfers)...`);
@@ -62,11 +78,12 @@ async function main() {
     for (let i = 0; i < 5; i++) {
       console.log(`   • Sending transfer ${i + 1}/5...`);
 
+      // Use 1 wei to avoid balance issues
       const hash = await walletClient.sendTransaction({
         to: tokenAddress as `0x${string}`,
         data: '0xa9059cbb' + // transfer(address,uint256)
               '0'.repeat(24) + '70997970C51812dc3A010C7d01b50e0d17dc79C8'.slice(2).toLowerCase() + // to address
-              '0'.repeat(64 - (1000n + BigInt(i)).toString(16).length) + (1000n + BigInt(i)).toString(16), // amount
+              '0'.repeat(63) + '1', // 1 wei amount
       });
 
       canonicalTxHashes.push(hash);
@@ -75,9 +92,9 @@ async function main() {
       // Wait for transaction to be mined
       await publicClient.waitForTransactionReceipt({ hash });
 
-      // Mine a block to ensure transaction is included
+      // Mine a block
       // @ts-ignore - anvil mine is available
-      await publicClient.extend({ mine: 1 });
+      await testClient.mine({ blocks: 1 });
 
       await sleep(500);
     }
@@ -98,13 +115,13 @@ async function main() {
 
     // Revert to the snapshot point (before the 5 blocks)
     // @ts-ignore - anvil snapshot/revert are available
-    const snapshotId = await publicClient.snapshot();
+    const snapshotId = await testClient.snapshot();
     console.log(`📸 Snapshot taken at block: ${currentBlock}`);
     console.log(`   Snapshot ID: ${snapshotId}`);
 
     // Revert to create a fork
     // @ts-ignore
-    await publicClient.revert({ id: snapshotId });
+    await testClient.revert({ id: snapshotId });
     console.log(`⏪ Time reverted! Chain is now back at block ${currentBlock}`);
 
     console.log(`\n📝 Phase 3: Mining alternate chain (5 DIFFERENT blocks)...`);
@@ -114,11 +131,12 @@ async function main() {
     for (let i = 0; i < 5; i++) {
       console.log(`   • Sending alternate transfer ${i + 1}/5...`);
 
+      // Use DIFFERENT recipient to create different transactions
       const hash = await walletClient.sendTransaction({
         to: tokenAddress as `0x${string}`,
         data: '0xa9059cbb' + // transfer(address,uint256)
               '0'.repeat(24) + '3C44CdDdB6a900fa2b585dd299e03d12fA4293BC'.slice(2).toLowerCase() + // DIFFERENT to address
-              '0'.repeat(64 - (2000n + BigInt(i)).toString(16).length) + (2000n + BigInt(i)).toString(16), // DIFFERENT amount
+              '0'.repeat(63) + '1', // 1 wei
       });
 
       alternateTxHashes.push(hash);
@@ -127,7 +145,7 @@ async function main() {
       await publicClient.waitForTransactionReceipt({ hash });
 
       // @ts-ignore
-      await publicClient.extend({ mine: 1 });
+      await testClient.mine({ blocks: 1 });
 
       await sleep(500);
     }

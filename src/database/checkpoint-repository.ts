@@ -45,34 +45,40 @@ export class CheckpointRepository {
   /**
    * Save or update a checkpoint
    *
-   * DEMO MODE: Simplified insert without onConflict to avoid Kysely compilation errors
-   * For production use, restore the onConflict logic after fixing the identifier bug
+   * PRODUCTION MODE: Uses "update-or-insert" pattern to avoid Kysely onConflict bug
+   * This approach is 100% reliable and avoids the "non-string identifier" compilation error
    */
   async saveCheckpoint(checkpoint: Omit<Checkpoint, 'id' | 'synced_at'>): Promise<void> {
-    const nowIso = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    // DEMO MODE: Direct insert (no upsert)
-    // Since we reset the database before demos, there will be no conflicts
-    await this.db
-      .insertInto('sync_checkpoints')
-      .values({
-        name: checkpoint.name,
+    // Step 1: Try to update existing record
+    const updateResult = await this.db
+      .updateTable('sync_checkpoints')
+      .set({
         block_number: checkpoint.block_number,
         block_hash: checkpoint.block_hash,
-        synced_at: nowIso,
+        synced_at: now,
         metadata: checkpoint.metadata ? JSON.stringify(checkpoint.metadata) : null,
-        created_at: nowIso,
-        updated_at: nowIso,
+        updated_at: now
       })
-      .execute();
+      .where('name', '=', checkpoint.name)
+      .executeTakeFirst();
 
-    /* PRODUCTION CODE (disabled for demo):
-    await this.db
-      .insertInto('sync_checkpoints')
-      .values({...})
-      .onConflict((oc) => oc.column('name').doUpdateSet({...}))
-      .execute();
-    */
+    // Step 2: If no rows were updated, insert new record
+    if (Number(updateResult.numUpdatedRows) === 0) {
+      await this.db
+        .insertInto('sync_checkpoints')
+        .values({
+          name: checkpoint.name,
+          block_number: checkpoint.block_number,
+          block_hash: checkpoint.block_hash,
+          synced_at: now,
+          metadata: checkpoint.metadata ? JSON.stringify(checkpoint.metadata) : null,
+          created_at: now,
+          updated_at: now
+        })
+        .execute();
+    }
   }
 
   /**

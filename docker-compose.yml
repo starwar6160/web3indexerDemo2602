@@ -30,11 +30,6 @@ services:
     restart: unless-stopped
     networks:
       - indexer-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8545"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # -------------------------------------------------------------------------
   # Layer 2: Persistence Layer (PostgreSQL)
@@ -71,7 +66,7 @@ services:
     container_name: web3-indexer-sync
     depends_on:
       blockchain-node:
-        condition: service_healthy
+        condition: service_started
       postgres:
         condition: service_healthy
     environment:
@@ -79,12 +74,14 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-web3_indexer}
       - NODE_ENV=production
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - INDEXER_MODE=production
+      - ENABLE_HEALTH_SERVER=true
     restart: unless-stopped
     networks:
       - indexer-network
-    command: ["node", "dist/sync-engine.js"]
+    command: ["node", "dist/index-production.js"]
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep 'node dist/sync-engine.js' | grep -v grep || exit 1"]
+      test: ["CMD-SHELL", "ps aux | grep 'node dist/index-production.js' | grep -v grep || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

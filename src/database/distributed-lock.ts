@@ -222,7 +222,7 @@ export class AppLock {
         WHERE expires_at < NOW()
       `.execute(this.db);
 
-      const count = result.rowCount ?? 0;
+      const count = (result as any).rowCount ?? 0;
       if (count > 0) {
         console.log(`[AppLock] 🧹 Cleaned up ${count} expired locks`);
       }

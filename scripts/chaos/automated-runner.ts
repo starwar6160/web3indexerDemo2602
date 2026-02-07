@@ -228,22 +228,7 @@ const AUTONOMOUS_TESTS: ChaosTest[] = [
     file: 'scripts/chaos/toxic-rpc-proxy.ts',
     category: 'network',
     danger: 'medium',
-    automatedSetup: async () => {
-      // Start proxy in background with automated mode
-      console.log('🚀 Starting Toxic RPC Proxy in automated mode...');
-
-      const proxyProcess = spawn('npx', ['ts-node', '--transpile-only', 'scripts/chaos/toxic-rpc-proxy.ts', '--automated'], {
-        stdio: 'inherit',
-        detached: true,
-      });
-
-      proxyProcess.unref();
-      await sleep(2000);
-
-      // Update RPC URL to point to proxy
-      process.env.RPC_URL = 'http://localhost:8546';
-      console.log('✅ Proxy started on :8546');
-    },
+    // No automatedSetup needed - test script handles proxy lifecycle
   },
   {
     name: 'bigint',
@@ -312,12 +297,6 @@ async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string
     console.log('⚙️  Running automated setup...');
     try {
       await test.automatedSetup();
-
-      // Extra cooldown for toxic-rpc to ensure proxy fully starts
-      if (test.name === 'toxic-rpc') {
-        console.log('⏸️  Waiting 3 seconds for proxy to stabilize...\n');
-        await sleep(3000);
-      }
     } catch (error) {
       console.error('❌ Automated setup failed:', error);
       return false;

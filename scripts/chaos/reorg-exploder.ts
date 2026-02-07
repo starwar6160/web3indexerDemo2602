@@ -47,23 +47,12 @@ async function getOrDeployContract(
   walletClient: any,
   publicClient: any
 ): Promise<`0x${string}`> {
-  const envAddress = process.env.TOKEN_CONTRACT_ADDRESS as `0x${string}`;
+  // ALWAYS deploy fresh contract for chaos tests
+  // This ensures we have a contract with proper setup (token balance from deposit)
+  // and avoids "环境残留" issues from stale addresses
 
-  // Check if env address exists on current chain
-  if (envAddress) {
-    try {
-      const code = await publicClient.getBytecode({ address: envAddress });
-      if (code && code !== '0x') {
-        console.log(`✅ Contract at ${envAddress} is valid`);
-        return envAddress;
-      }
-    } catch (error) {
-      console.log('⚠️  Contract address check failed, will deploy new one');
-    }
-  }
+  console.log('\n🏗️  Deploying fresh SimpleBank contract for chaos test...');
 
-  // Deploy new contract
-  console.log('\n🏗️  Deploying new SimpleBank contract...');
   const deployHash = await walletClient.deployContract({
     abi: SIMPLE_BANK_ABI,
     bytecode: SIMPLE_BANK_BYTECODE,

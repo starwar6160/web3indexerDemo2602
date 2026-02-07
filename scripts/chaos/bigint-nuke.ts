@@ -28,6 +28,17 @@ const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 const TOKEN_CONTRACT = process.env.TOKEN_CONTRACT_ADDRESS;
 
+// SimpleBank ABI for deposit()
+const SIMPLE_BANK_ABI = [
+  {
+    type: 'function',
+    name: 'deposit',
+    stateMutability: 'payable',
+    inputs: [],
+    outputs: []
+  },
+] as const;
+
 // ERC20 Transfer signature: transfer(address,uint256)
 const TRANSFER_SELECTOR = '0xa9059cbb';
 
@@ -74,13 +85,25 @@ async function main() {
   const recipient2 = '0x3C44CdDdB6a900fa2b585dd299e03d12fA4293BC' as `0x${string}`;
 
   try {
-    // 💰 CHEATCODE: Give account huge balance
-    console.log('💰 Funding test account with Anvil cheatcode...');
+    // 💰 CHEATCODE: Give account huge ETH balance
+    console.log('💰 Funding test account with ETH...');
     await testClient.setBalance({
       address: account.address,
       value: parseEther('10000'),
     });
-    console.log(`✅ Funded ${account.address} with 10000 ETH\n`);
+    console.log(`✅ Funded ${account.address} with 10000 ETH`);
+
+    // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
+    console.log('\n💰 Depositing to get SimpleBank tokens...');
+    const depositHash = await walletClient.writeContract({
+      address: TOKEN_CONTRACT as `0x${string}`,
+      abi: SIMPLE_BANK_ABI,
+      functionName: 'deposit',
+      value: parseEther('1000'), // Deposit 1000 ETH
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: depositHash });
+    console.log(`✅ Deposited 1000 ETH, received tokens\n`);
 
     // ==========================================
     // TEST 1: LARGE VALUE (Exceeds Number.MAX_SAFE_INTEGER)

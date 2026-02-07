@@ -24,6 +24,17 @@ import { privateKeyToAccount } from 'viem/accounts';
 const RPC_URL = process.env.RPC_URL || 'http://localhost:58545';
 const PRIVATE_KEY = process.env.PRIVATE_KEY || '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
+// SimpleBank ABI for deposit()
+const SIMPLE_BANK_ABI = [
+  {
+    type: 'function',
+    name: 'deposit',
+    stateMutability: 'payable',
+    inputs: [],
+    outputs: []
+  },
+] as const;
+
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -53,13 +64,25 @@ async function main() {
   });
 
   try {
-    // 💰 CHEATCODE: Give account huge balance
-    console.log('💰 Funding test account with Anvil cheatcode...');
+    // 💰 CHEATCODE: Give account huge ETH balance
+    console.log('💰 Funding test account with ETH...');
     await testClient.setBalance({
       address: account.address,
       value: parseEther('10000'),
     });
-    console.log(`✅ Funded ${account.address} with 10000 ETH\n`);
+    console.log(`✅ Funded ${account.address} with 10000 ETH`);
+
+    // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
+    console.log('\n💰 Depositing to get SimpleBank tokens...');
+    const depositHash = await walletClient.writeContract({
+      address: tokenAddress as `0x${string}`,
+      abi: SIMPLE_BANK_ABI,
+      functionName: 'deposit',
+      value: parseEther('1000'), // Deposit 1000 ETH
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: depositHash });
+    console.log(`✅ Deposited 1000 ETH, received tokens\n`);
 
     // Get current block number
     const currentBlock = await publicClient.getBlockNumber();

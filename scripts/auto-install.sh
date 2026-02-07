@@ -127,15 +127,35 @@ install_docker_fedora() {
         docker-latest docker-latest-logrotate docker-logrotate docker-engine \
         podman podman-compose 2>/dev/null || true
 
-    # Add Docker repository
+    # Add Docker repository (compatible with DNF 5)
     print_info "Adding Docker repository..."
-    $SUDO dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+    # Try dnf5 config-manager syntax first
+    if $SUDO dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null; then
+        print_success "Added repository using DNF5 syntax"
+    elif $SUDO dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null; then
+        print_success "Added repository using legacy syntax"
+    else
+        print_info "Falling back to manual repository creation..."
+        $SUDO tee /etc/yum.repos.d/docker-ce.repo >/dev/null <<EOF
+[docker-ce-stable]
+name=Docker CE Stable - \$basearch
+baseurl=https://download.docker.com/linux/fedora/\$releasever/stable/\$basearch
+enabled=1
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/fedora/gpg
+EOF
+    fi
 
     # Install Docker CE
     print_info "Installing Docker CE..."
     $SUDO dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-    # Install docker-compose v2 (comes with docker-compose plugin)
+    # Install docker-compose standalone for compatibility
+    if ! command_exists docker-compose; then
+        print_info "Installing docker-compose standalone..."
+        $SUDO dnf install -y docker-compose
+    fi
+
     print_success "Docker installed successfully"
 
     # Note: On Fedora, use "docker compose" (v2) instead of "docker-compose"

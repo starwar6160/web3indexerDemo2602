@@ -337,8 +337,17 @@ export class SyncEngine {
     // CRITICAL FIX: Convert validated blocks to DB format
     const dbBlocks = validatedBlocks.map(toDbBlock);
 
-    // Phase 3.5: Fetch Transfer events (INSIDE transaction for true atomicity)
+    // Phase 3.5: Fetch Transfer events OUTSIDE transaction [C4 Fix]
+    // RPC calls are slow and unpredictable - must not hold DB connection
+    let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
+    if (this.config.tokenContract) {
+      console.log(`[SyncEngine] Fetching Transfer events for batch (before transaction)...`);
+      transfers = await this.getTransferEvents(startBlock, endBlock);
+      console.log(`[SyncEngine] Fetched ${transfers.length} Transfer events`);
+    }
+
     // Phase 4: Atomic database write in transaction (C3 fix) - BLOCKS + TRANSFERS
+    // CRITICAL: Only DB operations inside transaction - no RPC calls
     let insertedCount = 0;
     let updatedCount = 0;
     let transfersSaved = 0;
@@ -374,15 +383,7 @@ export class SyncEngine {
         console.warn(`[SyncEngine] ✅ Reorg handled atomically inside transaction`);
       }
 
-      // 4a. Fetch events INSIDE transaction - fail fast if RPC unavailable
-      let transfers: Omit<Transfer, 'id' | 'created_at'>[] = [];
-      if (this.config.tokenContract) {
-        console.log(`[SyncEngine] Fetching Transfer events for batch (inside transaction)...`);
-        transfers = await this.getTransferEvents(startBlock, endBlock);
-        console.log(`[SyncEngine] Fetched ${transfers.length} Transfer events`);
-      }
-
-      // 4b. Save blocks
+      // 4a. Save blocks
       for (const block of dbBlocks) {
         const now = new Date().toISOString();
 
@@ -394,14 +395,13 @@ export class SyncEngine {
             updated_at: now,
           })
           .onConflict((oc) => oc
-            .columns(['chain_id', 'number'])
+            .column('number') // [C3 Fix] Use singular column() with string literal
             .doUpdateSet({
-              hash: block.hash,
-              parent_hash: block.parent_hash,
-              timestamp: block.timestamp,
+              hash: (eb) => eb.ref('excluded.hash'), // Use excluded pseudo-table
+              parent_hash: (eb) => eb.ref('excluded.parent_hash'),
+              timestamp: (eb) => eb.ref('excluded.timestamp'),
               updated_at: now,
             })
-            .where('blocks.hash', '!=', block.hash)
           )
           .returningAll()
           .executeTakeFirst();
@@ -419,7 +419,7 @@ export class SyncEngine {
         }
       }
 
-      // 4c. Save transfers atomically (cascade delete via FK)
+      // 4b. Save transfers atomically (cascade delete via FK)
       if (transfers.length > 0) {
         transfersSaved = await this.transfersRepository.saveWithTrx(trx, transfers);
         console.log(`[SyncEngine] ✅ Saved ${transfersSaved} Transfer events in same transaction`);

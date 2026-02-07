@@ -157,13 +157,14 @@ export class SyncEngine {
             topics: log.topics,
           });
 
+          const args = decoded.args as any;
           return {
             block_number: log.blockNumber,
             transaction_hash: log.transactionHash,
             log_index: log.logIndex,
-            from_address: String(decoded.args?.from || '0x0'),
-            to_address: String(decoded.args?.to || '0x0'),
-            amount: String(decoded.args?.amount || '0'),
+            from_address: String(args?.from || '0x0'),
+            to_address: String(args?.to || '0x0'),
+            amount: String(args?.amount || '0'),
             token_address: this.config.tokenContract!,
           };
         });
@@ -195,7 +196,7 @@ export class SyncEngine {
       }
 
       console.log(`[SyncEngine] Total transfers fetched: ${validatedTransfers.length}`);
-      return validatedTransfers;
+      return validatedTransfers as any;
     } catch (error) {
       console.error('[SyncEngine] Failed to fetch Transfer events:', error);
       throw new Error(`Event fetch failed: ${error}`);
@@ -288,7 +289,7 @@ export class SyncEngine {
     // Process results
     for (const result of results) {
       if (result.success && 'block' in result) {
-        blocksToSave.push(result.block);
+        blocksToSave.push(result.block as any);
       } else {
         failedBlocks.push({ number: result.blockNumber, error: result.error });
       }
@@ -432,7 +433,7 @@ export class SyncEngine {
               hash: (eb) => eb.ref('excluded.hash'), // Use excluded pseudo-table
               parent_hash: (eb) => eb.ref('excluded.parent_hash'),
               timestamp: (eb) => eb.ref('excluded.timestamp'),
-              updated_at: now,
+              updated_at: now as any,
             })
           )
           .returningAll()

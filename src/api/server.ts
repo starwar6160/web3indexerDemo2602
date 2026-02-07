@@ -504,6 +504,43 @@ export function createApiServer(config: Partial<ApiServerConfig> = {}) {
 }
 
 /**
+ * Detect WSL2 environment
+ */
+function isWSL2(): boolean {
+  try {
+    const os = require('os');
+    return os.release().toLowerCase().includes('microsoft');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get WSL2 IP address
+ */
+function getWSL2IP(): string {
+  try {
+    const os = require('os');
+    const networkInterfaces = os.networkInterfaces();
+    for (const name of Object.keys(networkInterfaces)) {
+      if (name.includes('eth') || name.includes('wsl')) {
+        const iface = networkInterfaces[name];
+        if (iface) {
+          for (const config of iface) {
+            if (config.family === 'IPv4' && !config.internal) {
+              return config.address;
+            }
+          }
+        }
+      }
+    }
+    return 'localhost';
+  } catch {
+    return 'localhost';
+  }
+}
+
+/**
  * Check database health
  */
 async function checkDbHealth(): Promise<boolean> {
@@ -515,6 +552,7 @@ async function checkDbHealth(): Promise<boolean> {
     return false;
   }
 }
+
 /**
  * Start API server
  */
@@ -523,19 +561,58 @@ export async function startApiServer(config: Partial<ApiServerConfig> = {}): Pro
 
   return new Promise((resolve, reject) => {
     const server = app.listen(finalConfig.port, () => {
-      logger.info(
-        {
-          port: finalConfig.port,
-          endpoints: [
-            '/api/status',
-            '/api/blocks',
-            '/api/blocks/:number',
-            '/api/transfers',
-            '/health',
-          ],
-        },
-        '🚀 API server started'
-      );
+      const isWSL = isWSL2();
+      const dashboardURL = isWSL
+        ? `http://localhost:${finalConfig.port}/dashboard`
+        : `http://localhost:${finalConfig.port}/dashboard`;
+
+      const accessInfo = {
+        port: finalConfig.port,
+        dashboard: dashboardURL,
+        endpoints: [
+          '/api/status',
+          '/api/blocks',
+          '/api/blocks/:number',
+          '/api/transfers',
+          '/health',
+          '/dashboard',
+          '/docs',
+        ],
+      };
+
+      // Add WSL-specific access instructions
+      if (isWSL) {
+        const wslIP = getWSL2IP();
+        accessInfo['WSL Access'] = {
+          'From WSL': dashboardURL,
+          'From Windows': `http://localhost:${finalConfig.port}/dashboard`,
+          'From Network': `http://${wslIP}:${finalConfig.port}/dashboard`,
+          'Windows Port Forward (run in PowerShell as admin)': `netsh interface portproxy add v4tov4 listenport=${finalConfig.port} listenaddress=0.0.0.0 connectport=${finalConfig.port} connectaddress=${wslIP}`,
+        };
+      }
+
+      logger.info(accessInfo, '🚀 API server started');
+
+      // Console-friendly output for development
+      console.log('\n' + '='.repeat(70));
+      console.log('  🚀 API Server Started');
+      console.log('='.repeat(70));
+      console.log(`  Dashboard: ${dashboardURL}`);
+      console.log(`  API Docs:  http://localhost:${finalConfig.port}/docs`);
+      console.log(`  Health:    http://localhost:${finalConfig.port}/health`);
+
+      if (isWSL) {
+        const wslIP = getWSL2IP();
+        console.log('\n  📍 WSL2 Access Information:');
+        console.log(`     WSL IP: ${wslIP}`);
+        console.log(`     From Windows: http://localhost:${finalConfig.port}/dashboard`);
+        console.log(`     From Network:  http://${wslIP}:${finalConfig.port}/dashboard`);
+        console.log('\n  💡 Windows Port Forward (PowerShell as admin):');
+        console.log(`     netsh interface portproxy add v4tov4 listenport=${finalConfig.port} listenaddress=0.0.0.0 connectport=${finalConfig.port} connectaddress=${wslIP}`);
+      }
+
+      console.log('='.repeat(70) + '\n');
+
       resolve();
     });
 

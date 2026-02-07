@@ -87,30 +87,24 @@ function encodeTransfer(to: string, amount: bigint): `0x${string}` {
   return `${TRANSFER_SELECTOR}${toEncoded}${amountEncoded}` as `0x${string}`;
 }
 
-// Get or deploy contract
-async function getOrDeployContract(
-  walletClient: any,
+// Validate contract exists
+async function getValidContract(
   publicClient: any
 ): Promise<`0x${string}`> {
-  // ALWAYS deploy fresh contract for chaos tests
-  // This ensures we have a contract with proper setup (token balance from deposit)
-  // and avoids "环境残留" issues from stale addresses
+  const envAddress = process.env.TOKEN_CONTRACT_ADDRESS as `0x${string}`;
 
-  console.log('\n🏗️  Deploying fresh SimpleBank contract for chaos test...');
-
-  const deployHash = await walletClient.deployContract({
-    abi: SIMPLE_BANK_ABI,
-    bytecode: SIMPLE_BANK_BYTECODE,
-  });
-
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
-
-  if (!receipt.contractAddress) {
-    throw new Error('Contract deployment failed');
+  if (!envAddress) {
+    throw new Error('TOKEN_CONTRACT_ADDRESS must be set in environment');
   }
 
-  console.log(`✅ Contract deployed: ${receipt.contractAddress}\n`);
-  return receipt.contractAddress;
+  // Verify contract exists on chain
+  const code = await publicClient.getBytecode({ address: envAddress });
+  if (!code || code === '0x') {
+    throw new Error(`No contract at ${envAddress}. Run 'make dev-with-demo' first.`);
+  }
+
+  console.log(`✅ Using existing contract: ${envAddress}\n`);
+  return envAddress;
 }
 
 async function main() {
@@ -149,8 +143,8 @@ async function main() {
     });
     console.log(`✅ Funded ${account.address} with 10000 ETH`);
 
-    // 🏗️ Get or deploy contract (self-contained!)
-    const tokenAddress = await getOrDeployContract(walletClient, publicClient);
+    // 🏗️ Validate existing contract from demo
+    const tokenAddress = await getValidContract(publicClient);
 
     // 💰 DEPOSIT: Exchange ETH for SimpleBank tokens
     // Deposit 500 ETH to have enough for the 100 ETH large transfer

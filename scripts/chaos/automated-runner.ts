@@ -312,6 +312,12 @@ async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string
     console.log('⚙️  Running automated setup...');
     try {
       await test.automatedSetup();
+
+      // Extra cooldown for toxic-rpc to ensure proxy fully starts
+      if (test.name === 'toxic-rpc') {
+        console.log('⏸️  Waiting 3 seconds for proxy to stabilize...\n');
+        await sleep(3000);
+      }
     } catch (error) {
       console.error('❌ Automated setup failed:', error);
       return false;

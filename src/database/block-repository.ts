@@ -82,8 +82,8 @@ export class BlockRepository {
           .insertInto('blocks')
           .values({
             ...block,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            created_at: new Date() as any, // Kysely will handle Date -> timestamptz conversion
+            updated_at: new Date() as any,
           })
           .returningAll()
           .executeTakeFirst();

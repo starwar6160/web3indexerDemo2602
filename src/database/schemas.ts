@@ -128,11 +128,15 @@ export function validateBlocks(blocks: unknown[]): ValidatedBlock[] {
  * 防止精度丢失（JS Number 安全整数范围: ±2^53-1）
  */
 export function toDbBlock(block: ValidatedBlock) {
+  // Convert bigint timestamp (seconds) to JavaScript Date for PostgreSQL
+  // viem returns timestamp in seconds, PostgreSQL timestamptz expects Date or ISO string
+  const timestampDate = new Date(Number(block.timestamp) * 1000);
+
   return {
     number: block.number,
     hash: block.hash,
-    timestamp: block.timestamp, // ✅ 保持 bigint，不转换
+    timestamp: timestampDate as unknown as bigint, // Convert bigint seconds to Date for PostgreSQL
     parent_hash: block.parentHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
-    chain_id: 1n, // ✅ 默认 chain_id（Phase 1 已添加到 schema）
+    chain_id: 31337n, // Default chain ID for local anvil
   };
 }

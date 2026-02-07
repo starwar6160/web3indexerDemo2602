@@ -175,7 +175,14 @@ async function main() {
     });
 
     await publicClient.waitForTransactionReceipt({ hash: depositHash });
-    console.log(`✅ Deposited 500 ETH, received tokens\n`);
+    console.log(`✅ Deposited 500 ETH, received tokens`);
+
+    // 🛑 CRITICAL: Force EVM state sync after deposit
+    // Ensure balances[msg.sender] is fully committed before transfers
+    // @ts-ignore
+    await testClient.mine({ blocks: 1 });
+    await sleep(500);
+    console.log(`   Deposit committed, ready for transfers\n`);
 
     // ==========================================
     // TEST 1: LARGE VALUE (Exceeds Number.MAX_SAFE_INTEGER)

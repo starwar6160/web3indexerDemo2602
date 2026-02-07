@@ -1,9 +1,11 @@
 import { createPublicClient, http, decodeEventLog, type Address, type Log } from 'viem';
 import { simpleBankAbi } from '../abis/simple-bank';
-import { TransactionRepository, type Transaction } from '../database/transaction-repository';
+import { TransactionRepository } from '../database/transaction-repository';
 import { SyncStatusRepository } from '../database/sync-status-repository';
 import { strictValidateLogs, type ValidatedLog } from '../database/strict-schemas';
 import logger from '../utils/logger';
+
+type Transaction = any;
 
 /**
  * Event Indexer - Phase 3: Event parsing core logic
@@ -143,7 +145,8 @@ export class EventIndexer {
 
     // Log event type distribution
     const eventCounts = decodedEvents.reduce((acc, e) => {
-      acc[e.eventName] = (acc[e.eventName] || 0) + 1;
+      const name = (e as any).eventName || 'Unknown';
+      (acc as any)[name] = ((acc as any)[name] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 

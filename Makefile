@@ -330,3 +330,34 @@ setup: install up db-init
 	@echo '  make dev          # Development mode'
 	@echo '  make api          # API server only'
 	@echo '  make sync         # Indexer only'
+
+## chaos: Run autonomous chaos tests (zero-touch)
+chaos:
+	@echo '$(BLUE)🐵 Running Chaos Engineering Tests...$(NC)'
+	@echo '$(YELLOW)⚠️  This will automatically:$(NC)'
+	@echo '  • Clean up ghost processes'
+	@echo '  • Discover environment'
+	@echo '  • Execute all chaos tests'
+	@echo '  • Verify recovery'
+	@echo ''
+	npm run chaos:automated
+
+## chaos-reorg: Run specific chaos test (chain reorganization)
+chaos-reorg:
+	@echo '$(BLUE)💣 Testing chain reorganization...$(NC)'
+	npm run chaos:automated reorg
+
+## chaos-toxic: Run specific chaos test (RPC failures)
+chaos-toxic:
+	@echo '$(BLUE)☠️  Testing RPC failure handling...$(NC)'
+	npm run chaos:automated toxic-rpc
+
+## chaos-bigint: Run specific chaos test (numeric boundaries)
+chaos-bigint:
+	@echo '$(BLUE)💥 Testing numeric boundaries...$(NC)'
+	npm run chaos:automated bigint
+
+## chaos-db: Run specific chaos test (database crash)
+chaos-db:
+	@echo '$(BLUE)💀 Testing database crash recovery...$(NC)'
+	npm run chaos:automated db-killer

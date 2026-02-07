@@ -29,13 +29,45 @@ interface ChaosTest {
 }
 
 // ============================================================
+// PORT REAPER - Clean up ghost processes
+// ============================================================
+
+function cleanupPorts() {
+  console.log('\n🧹 Cleaning up ghost processes...\n');
+
+  try {
+    // Kill processes on port 8546 (toxic proxy)
+    try {
+      execSync('lsof -ti:8546 | xargs kill -9 2>/dev/null || true', { stdio: 'pipe' });
+      console.log('✅ Port 8546 cleaned');
+    } catch (error) {
+      // Port already clear
+    }
+
+    // Kill processes on port 3001 (API server)
+    try {
+      execSync('lsof -ti:3001 | xargs kill -9 2>/dev/null || true', { stdio: 'pipe' });
+      console.log('✅ Port 3001 cleaned');
+    } catch (error) {
+      // Port already clear
+    }
+
+  } catch (error) {
+    // Ignore cleanup errors
+  }
+}
+
+// ============================================================
 // ENVIRONMENT AUTO-DISCOVERY
 // ============================================================
 
-async function discoverEnvironment() {
+async function discoverEnvironment(): Promise<Record<string, string> | null> {
   console.log('\n🔍 Auto-discovering test environment...\n');
 
   const env: Record<string, string> = {};
+
+  // Start with existing process.env
+  Object.assign(env, process.env);
 
   // Read .env if exists
   try {
@@ -264,12 +296,17 @@ function printHeader(title: string) {
   console.log('='.repeat(70));
 }
 
-async function runAutonomousTest(test: ChaosTest): Promise<boolean> {
+async function runAutonomousTest(test: ChaosTest, testEnv: Record<string, string>): Promise<boolean> {
   printHeader(`🚀 AUTONOMOUS TEST: ${test.name.toUpperCase()}`);
 
   console.log(`\nDescription: ${test.description}`);
   console.log(`Category: ${test.category}`);
   console.log(`Danger Level: ${test.danger}\n`);
+
+  // Debug: Show what environment variables we're passing
+  console.log('📝 Environment Context:');
+  console.log(`   TOKEN_CONTRACT_ADDRESS: ${testEnv.TOKEN_CONTRACT_ADDRESS || 'NOT SET'}`);
+  console.log(`   RPC_URL: ${testEnv.RPC_URL}\n`);
 
   // Automated setup
   if (test.automatedSetup) {
@@ -282,13 +319,13 @@ async function runAutonomousTest(test: ChaosTest): Promise<boolean> {
     }
   }
 
-  // Execute the test
+  // Execute the test with injected environment
   console.log('💣 Executing chaos test...\n');
 
   try {
     execSync(`npx ts-node --transpile-only ${test.file}`, {
       stdio: 'inherit',
-      env: { ...process.env },
+      env: testEnv,  // Use injected environment instead of process.env
     });
 
     console.log('\n✅ Chaos test execution completed\n');
@@ -334,12 +371,16 @@ async function main() {
 
   console.log('\n⚠️  Zero-Touch Testing Mode');
   console.log('   This will automatically:');
+  console.log('   • Clean up ghost processes');
   console.log('   • Discover test environment');
   console.log('   • Execute all chaos tests');
   console.log('   • Verify system recovery');
   console.log('   • Assert data integrity\n');
 
-  // Auto-discover environment
+  // Step 1: Clean up ghost processes
+  cleanupPorts();
+
+  // Step 2: Auto-discover environment
   const env = await discoverEnvironment();
 
   if (!env) {
@@ -362,7 +403,12 @@ async function main() {
       process.exit(1);
     }
 
-    const passed = await runAutonomousTest(test);
+    // Configure RPC_URL for specific test
+    if (test.name === 'toxic-rpc') {
+      env.RPC_URL = 'http://localhost:8546';
+    }
+
+    const passed = await runAutonomousTest(test, env);
     process.exit(passed ? 0 : 1);
   }
 
@@ -385,7 +431,13 @@ async function main() {
   const results: { name: string; success: boolean }[] = [];
 
   for (const test of AUTONOMOUS_TESTS) {
-    const success = await runAutonomousTest(test);
+    // Configure environment for this specific test
+    const testEnv = { ...env };
+    if (test.name === 'toxic-rpc') {
+      testEnv.RPC_URL = 'http://localhost:8546';
+    }
+
+    const success = await runAutonomousTest(test, testEnv);
     results.push({ name: test.name, success });
 
     // Cool-down between tests
